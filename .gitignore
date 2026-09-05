@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+models/*.joblib
+models/*.pt
+models/*.png
+yolov8n.pt
+yolov8s.pt
+src/yolov8n.pt
+src/yolov8s.pt
+.streamlit/

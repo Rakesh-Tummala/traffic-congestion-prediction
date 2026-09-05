@@ -1,0 +1,16 @@
+# torch is intentionally unpinned here: install it separately first with the CPU
+# wheel index (see README Setup) since the pinned +cpu build isn't on plain PyPI.
+torch>=2.1
+
+pandas==3.0.5
+numpy==2.4.6
+scikit-learn==1.9.0
+matplotlib==3.11.1
+seaborn==0.13.2
+joblib==1.6.0
+ultralytics==8.4.139
+opencv-python==5.0.0.93
+streamlit==1.63.0
+requests==2.34.2
+Pillow==12.3.0
+pytest==9.1.1
