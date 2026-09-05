@@ -1,6 +1,6 @@
 """Fusion pipeline: take a live camera frame + current time/weather, run CV vehicle
-counting, then feed the combined feature vector into the trained LR/SVR models to
-produce a live congestion prediction."""
+counting, then feed the combined feature vector into the trained models (Linear
+Regression, SVR, and LSTM) to produce a live congestion prediction."""
 import argparse
 import os
 from datetime import datetime, timedelta
@@ -9,11 +9,15 @@ from functools import lru_cache
 import joblib
 import numpy as np
 import pandas as pd
+import torch
 
 from cv_module import CONGESTION_LEVELS, analyze_frame, congestion_from_density, load_frame
 from data_loader import FEATURE_COLUMNS, WEATHER_CODES, load_dataset
+from train_dl import SEQ_LEN, TrafficLSTM
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+REGRESSION_MODELS = ["linear_regression", "svr"]
+ALL_MODELS = REGRESSION_MODELS + ["lstm"]
 
 
 @lru_cache(maxsize=1)
@@ -76,13 +80,70 @@ def predict_volume(model_path: str, X: pd.DataFrame) -> float:
     return float(bundle["model"].predict(X_scaled)[0])
 
 
-def calibrated_label(volume: float) -> str:
-    """Map a predicted volume back to a Low/Moderate/High/Severe label using
-    quartile edges fit on the full training dataset."""
+@lru_cache(maxsize=1)
+def _load_lstm():
+    scalers = joblib.load(os.path.join(MODELS_DIR, "lstm_scalers.joblib"))
+    model = TrafficLSTM(n_features=len(scalers["features"]))
+    model.load_state_dict(torch.load(os.path.join(MODELS_DIR, "lstm.pt"), map_location="cpu"))
+    model.eval()
+    return model, scalers
+
+
+def predict_lstm_volume(now: datetime, temp_c: float, rain_1h: float, snow_1h: float,
+                         clouds_all: float, is_holiday: int, weather_main: str,
+                         lag_1h: float = None, lag_3h: float = None, lag_24h: float = None) -> float:
+    """Predict next-hour volume with the LSTM, which needs a 24-hour sequence of
+    feature rows rather than a single snapshot. Without a live sensor feed there's
+    no real per-hour history to supply, so each of the 24 past hours is built the
+    same way build_feature_row's fallback works: current weather held constant
+    across the window (a simplifying assumption — weather 20h ago likely differed,
+    but the model has no other source for it) and lag features from the seasonal
+    (hour, day-of-week) profile, seeded with any real recent readings supplied."""
+    model, scalers = _load_lstm()
+    rows = []
+    for hours_ago in range(SEQ_LEN, 0, -1):
+        at = now - timedelta(hours=hours_ago)
+        row = build_feature_row(at, temp_c, rain_1h, snow_1h, clouds_all, is_holiday, weather_main,
+                                 lag_1h=lag_1h if hours_ago == 1 else None,
+                                 lag_3h=lag_3h if hours_ago == 1 else None,
+                                 lag_24h=lag_24h if hours_ago == 1 else None)
+        rows.append(row.iloc[0])
+
+    X = pd.DataFrame(rows)[scalers["features"]]
+    X_scaled = scalers["x_scaler"].transform(X).astype(np.float32)
+    with torch.no_grad():
+        pred_scaled = model(torch.from_numpy(X_scaled).unsqueeze(0)).numpy()
+    return float(scalers["y_scaler"].inverse_transform(pred_scaled.reshape(-1, 1))[0, 0])
+
+
+def predict_all_models(now: datetime, temp_c: float, rain_1h: float, snow_1h: float,
+                        clouds_all: float, is_holiday: int, weather_main: str,
+                        lag_1h: float = None, lag_3h: float = None, lag_24h: float = None) -> dict:
+    """Run all three trained models and return {model_name: predicted_volume}."""
+    X = build_feature_row(now, temp_c, rain_1h, snow_1h, clouds_all, is_holiday, weather_main,
+                           lag_1h=lag_1h, lag_3h=lag_3h, lag_24h=lag_24h)
+    predictions = {
+        name: predict_volume(os.path.join(MODELS_DIR, f"{name}.joblib"), X)
+        for name in REGRESSION_MODELS
+    }
+    predictions["lstm"] = predict_lstm_volume(now, temp_c, rain_1h, snow_1h, clouds_all,
+                                               is_holiday, weather_main, lag_1h, lag_3h, lag_24h)
+    return predictions
+
+
+@lru_cache(maxsize=1)
+def congestion_bins() -> np.ndarray:
+    """Quartile edges of traffic_volume fit on the full training dataset, used to
+    map a raw predicted volume to a Low/Moderate/High/Severe label."""
     _, _, y = load_dataset()
     bins = y.quantile([0, 0.25, 0.5, 0.75, 1.0]).to_numpy().copy()
     bins[0] -= 1
     bins[-1] += 1
+    return bins
+
+
+def calibrated_label(volume: float) -> str:
+    bins = congestion_bins()
     for i in range(4):
         if bins[i] < volume <= bins[i + 1]:
             return CONGESTION_LEVELS[i]
@@ -105,6 +166,23 @@ def fuse_labels(model_label: str, cv_label: str) -> str:
     return max([model_label, cv_label], key=CONGESTION_LEVELS.index)
 
 
+def forecast_day(base_date: datetime, temp_c: float, rain_1h: float, snow_1h: float,
+                  clouds_all: float, is_holiday: int, weather_main: str, model: str = "lstm") -> pd.DataFrame:
+    """Predicted volume for every hour of base_date's calendar day, holding weather
+    constant — gives context for "how does the current prediction compare to the
+    rest of the day" rather than just a single number in isolation."""
+    rows = []
+    for hour in range(24):
+        at = base_date.replace(hour=hour, minute=0, second=0, microsecond=0)
+        if model == "lstm":
+            volume = predict_lstm_volume(at, temp_c, rain_1h, snow_1h, clouds_all, is_holiday, weather_main)
+        else:
+            X = build_feature_row(at, temp_c, rain_1h, snow_1h, clouds_all, is_holiday, weather_main)
+            volume = predict_volume(os.path.join(MODELS_DIR, f"{model}.joblib"), X)
+        rows.append({"hour": hour, "volume": volume, "label": calibrated_label(volume)})
+    return pd.DataFrame(rows)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Live congestion prediction fusing a camera frame with trained models.")
     parser.add_argument("source", help="Image path, video path, snapshot URL, or webcam index")
@@ -114,7 +192,8 @@ def main():
     parser.add_argument("--clouds-all", type=float, default=20.0)
     parser.add_argument("--is-holiday", type=int, default=0)
     parser.add_argument("--weather-main", default="Clear", choices=list(WEATHER_CODES.keys()))
-    parser.add_argument("--model", default="svr", choices=["linear_regression", "svr"])
+    parser.add_argument("--model", default="lstm", choices=ALL_MODELS,
+                        help="Which historical model drives the fused label (default: lstm, the most accurate)")
     parser.add_argument("--save-annotated", default=None)
     parser.add_argument("--lag-1h", type=float, default=None, help="Real sensor volume reading from 1h ago, if available")
     parser.add_argument("--lag-3h", type=float, default=None, help="Real sensor volume reading from 3h ago, if available")
@@ -128,17 +207,16 @@ def main():
           f"image-based congestion={cv_label}")
 
     now = datetime.now()
-    X = build_feature_row(now, args.temp_c, args.rain_1h, args.snow_1h,
-                           args.clouds_all, args.is_holiday, args.weather_main,
-                           lag_1h=args.lag_1h, lag_3h=args.lag_3h, lag_24h=args.lag_24h)
+    predictions = predict_all_models(now, args.temp_c, args.rain_1h, args.snow_1h, args.clouds_all,
+                                      args.is_holiday, args.weather_main,
+                                      lag_1h=args.lag_1h, lag_3h=args.lag_3h, lag_24h=args.lag_24h)
+    print()
+    for name, volume in predictions.items():
+        print(f"[{name:>17s}] predicted volume: {volume:8.0f} -> {calibrated_label(volume)}")
 
-    model_path = os.path.join(MODELS_DIR, f"{args.model}.joblib")
-    predicted_volume = predict_volume(model_path, X)
-    model_label = calibrated_label(predicted_volume)
+    model_label = calibrated_label(predictions[args.model])
     final_label = fuse_labels(model_label, cv_label)
-
-    print(f"\n[{args.model}] predicted volume (time+weather history): {predicted_volume:.0f} -> {model_label}")
-    print(f"[fused] Congestion level (more severe of the two signals): {final_label}")
+    print(f"\n[fused] Using {args.model} + live camera, more severe of the two signals: {final_label}")
 
     if args.save_annotated:
         import cv2

@@ -11,6 +11,8 @@ joblib==1.6.0
 ultralytics==8.4.139
 opencv-python==5.0.0.93
 streamlit==1.63.0
+altair==6.2.2
+pydeck==0.9.3
 requests==2.34.2
 Pillow==12.3.0
 pytest==9.1.1

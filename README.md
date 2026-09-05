@@ -131,8 +131,10 @@ python evaluate.py              # trains everything, prints + plots comparison
 python -m pytest tests/ -v
 ```
 
-Covers the fusion logic (the "Low" bug and its fix) and the data/feature
-pipeline (lag correlation, cyclical encoding, no missing values).
+Covers the fusion logic (the "Low" bug and its fix), the data/feature
+pipeline (lag correlation, cyclical encoding, no missing values), and the
+live-inference path (all three models return sane predictions, a real
+sensor reading actually changes the output vs. the seasonal fallback).
 
 ## Run computer vision on a single frame
 
@@ -159,10 +161,28 @@ streamlit run app.py
 ```
 
 Pick a real live Caltrans camera (or upload an image / paste a snapshot URL),
-set weather conditions, and get vehicle counts plus a fused congestion
-prediction. Model and CV weights are cached across reruns
+set weather conditions, and get:
+
+- A color-coded **congestion badge** (green/amber/orange/red) for the final
+  fused level.
+- **All three models side by side** (Linear Regression, SVR, LSTM) with
+  predicted volume and R², not just whichever one is "selected" — the LSTM
+  is the most accurate (R²=0.977) but needs a synthetic 24h feature sequence
+  built the same way the live lag-feature fallback works
+  (`live_predict.predict_lstm_volume`), so it wasn't wired into live inference
+  until this pass; previously only LR/SVR were reachable from the app despite
+  the LSTM being the best model.
+- A **24-hour forecast chart** (Altair) showing predicted volume across the
+  whole day with the four congestion bands shaded in the background and the
+  current hour marked — context for "is right now unusual," not just a bare
+  number (`live_predict.forecast_day`).
+- A **live map** (pydeck) of the selected district's cameras, with the
+  chosen one highlighted, so you can see where you're looking before fetching.
+
+Model, CV, and LSTM weights are all cached across reruns
 (`lru_cache`/`st.cache_data`) so the dashboard doesn't reload them from disk
-on every interaction.
+on every interaction, and camera/forecast fetches are cache-backed with a
+TTL so switching sliders back and forth doesn't refire live network calls.
 
 ## Project structure
 
@@ -179,6 +199,6 @@ src/
   live_cameras.py     browse/fetch real public Caltrans CCTV camera snapshots
   live_predict.py     fuses CV output + trained models -> congestion label
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
-tests/                pytest suite (fusion logic, data pipeline)
+tests/                pytest suite (fusion logic, data pipeline, live inference)
 app.py                Streamlit dashboard
 ```
