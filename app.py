@@ -25,6 +25,7 @@ from live_predict import (  # noqa: E402
     forecast_day, fuse_labels, predict_all_models,
 )
 from speed_estimation import US_LANE_WIDTH_M, annotate_speeds, check_speeds  # noqa: E402
+from echallan import DISCLAIMER as ECHALLAN_DISCLAIMER, append_to_log, generate_challan, load_log, render_challan_html  # noqa: E402
 
 LEVEL_COLORS = {"Low": "#22c55e", "Moderate": "#eab308", "High": "#f97316", "Severe": "#ef4444"}
 MODEL_LABELS = {"linear_regression": "Linear Regression", "svr": "SVR", "lstm": "LSTM"}
@@ -369,31 +370,71 @@ with mode_single:
                     meters_per_pixel = lane_width_m / lane_width_px
                     with st.spinner("Capturing live video burst and tracking vehicles..."):
                         try:
-                            speed_result = check_speeds(live_stream_url, meters_per_pixel, speed_limit_mph)
+                            st.session_state["speed_result"] = check_speeds(live_stream_url, meters_per_pixel, speed_limit_mph)
+                            st.session_state["speed_result_cam_name"] = live_cam_name
+                            st.session_state["speed_result_limit_mph"] = speed_limit_mph
                         except Exception as e:
                             st.error(f"Speed check failed: {e}")
-                            speed_result = None
+                            st.session_state.pop("speed_result", None)
 
-                    if speed_result is not None:
-                        if not speed_result["results"]:
-                            st.info("No vehicles could be tracked across the burst — try again "
-                                    "(traffic is dynamic) or pick a busier camera.")
-                        else:
-                            annotated_speed_frame = annotate_speeds(speed_result["frames"][-1], speed_result["results"])
-                            st.image(cv2.cvtColor(annotated_speed_frame, cv2.COLOR_BGR2RGB),
-                                      caption=f"{live_cam_name} — tracked vehicle speeds", use_container_width=True)
-                            speed_df = pd.DataFrame([
-                                {"Vehicle": r["cls_name"], "Speed (mph)": round(r["speed_mph"], 1),
-                                 "Speed (km/h)": round(r["speed_kmh"], 1),
-                                 "Over limit (mph)": round(r["over_mph"], 1) if r["speeding"] else 0,
-                                 "Speeding": "Yes" if r["speeding"] else "No"}
-                                for r in sorted(speed_result["results"], key=lambda r: -r["speed_mph"])
-                            ])
-                            st.dataframe(speed_df, hide_index=True, use_container_width=True)
-                            n_speeding = sum(r["speeding"] for r in speed_result["results"])
-                            if n_speeding:
-                                st.warning(f"{n_speeding} of {len(speed_result['results'])} tracked vehicle(s) "
-                                           f"estimated over the {speed_limit_mph:.0f} mph limit.")
+                speed_result = st.session_state.get("speed_result")
+                if speed_result is not None:
+                    if not speed_result["results"]:
+                        st.info("No vehicles could be tracked across the burst — try again "
+                                "(traffic is dynamic) or pick a busier camera.")
+                    else:
+                        annotated_speed_frame = annotate_speeds(speed_result["frames"][-1], speed_result["results"])
+                        st.image(cv2.cvtColor(annotated_speed_frame, cv2.COLOR_BGR2RGB),
+                                  caption=f"{st.session_state.get('speed_result_cam_name')} — tracked vehicle speeds",
+                                  use_container_width=True)
+                        speed_df = pd.DataFrame([
+                            {"Vehicle": r["cls_name"], "Speed (mph)": round(r["speed_mph"], 1),
+                             "Speed (km/h)": round(r["speed_kmh"], 1),
+                             "Over limit (mph)": round(r["over_mph"], 1) if r["speeding"] else 0,
+                             "Speeding": "Yes" if r["speeding"] else "No"}
+                            for r in sorted(speed_result["results"], key=lambda r: -r["speed_mph"])
+                        ])
+                        st.dataframe(speed_df, hide_index=True, use_container_width=True)
+                        speeding_results = [r for r in speed_result["results"] if r["speeding"]]
+                        if speeding_results:
+                            st.warning(f"{len(speeding_results)} of {len(speed_result['results'])} tracked "
+                                       f"vehicle(s) estimated over the "
+                                       f"{st.session_state.get('speed_result_limit_mph'):.0f} mph limit.")
+
+                            st.markdown("###### Generate e-challan (simulated)")
+                            st.caption(ECHALLAN_DISCLAIMER)
+                            ec1, ec2 = st.columns([2, 1])
+                            with ec1:
+                                veh_labels = [f"{r['cls_name'].title()} — {r['speed_mph']:.0f} mph "
+                                              f"(+{r['over_mph']:.0f} over)" for r in speeding_results]
+                                veh_choice = st.selectbox("Vehicle", range(len(speeding_results)),
+                                                          format_func=lambda i: veh_labels[i], key="echallan_vehicle")
+                            with ec2:
+                                vehicle_number = st.text_input("Vehicle number (optional)", key="echallan_plate")
+
+                            if st.button("Generate e-challan"):
+                                challan = generate_challan(
+                                    speeding_results[veh_choice],
+                                    st.session_state.get("speed_result_cam_name") or "Unknown camera",
+                                    st.session_state.get("speed_result_limit_mph"),
+                                    vehicle_number=vehicle_number,
+                                )
+                                append_to_log(challan)
+                                st.session_state["last_challan_html"] = render_challan_html(challan)
+
+                            if st.session_state.get("last_challan_html"):
+                                st.markdown(st.session_state["last_challan_html"], unsafe_allow_html=True)
+
+                            with st.expander(f"Challan history ({len(load_log())} issued this install)"):
+                                log = load_log()
+                                if log:
+                                    st.dataframe(
+                                        pd.DataFrame(log)[["challan_id", "issued_at", "camera_name", "vehicle_class",
+                                                          "vehicle_number", "speed_mph", "fine_inr"]],
+                                        hide_index=True, use_container_width=True,
+                                    )
+                                else:
+                                    st.caption("No challans generated yet.")
 
 # ---------------------------------------------------------------- monitoring grid
 with mode_grid:

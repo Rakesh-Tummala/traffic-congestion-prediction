@@ -5,6 +5,7 @@ __pycache__/
 models/*.joblib
 models/*.pt
 models/*.png
+models/echallan_log.json
 yolov8n.pt
 yolov8s.pt
 src/yolov8n.pt
