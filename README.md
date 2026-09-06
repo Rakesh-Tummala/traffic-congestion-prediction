@@ -52,12 +52,15 @@ all wrapped in a Streamlit dashboard.
      flagging any more than 5mph over the limit. See
      [Speed estimation](#speed-estimation-experimental) below for how this
      works and its real limitations.
-   - **Generate e-challan (simulated)** — for any vehicle Speed check flagged
-     as speeding, pick it, optionally type a vehicle number, and click
-     **Generate e-challan** to produce a mock violation notice with an
-     illustrative fine. Purely a demo — see
-     [e-Challan simulation](#e-challan-simulation-demo-only) below for exactly
-     what this is and isn't.
+   - **What the fine would have been (simulated)** — for any vehicle Speed
+     check flagged as speeding, pick it, optionally click **🔍 Try plate
+     recognition** (real OCR — reads what it can, honestly reports "not
+     readable" when it can't; see limitations below), edit/enter the vehicle
+     number, and click **Generate summary** to see what the illustrative
+     fine would have been. Purely informational — no real citation is
+     issued and no fine is charged. See
+     [e-Challan simulation](#e-challan-simulation-demo-only) below for
+     exactly what this is and isn't.
 
 There's also a **🗂️ Monitoring grid** tab (top-level, next to "🔍 Single
 camera") for checking several cameras at once: pick a district, how many
@@ -85,8 +88,9 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (27 tests: fusion logic, feature pipeline, live inference, speed-tracking math, e-challan logic) |
-| Simulated citation demo | `src/echallan.py` — illustrative fine schedule, no ANPR (manual plate entry only), local JSON log |
+| Testing                | pytest (31 tests: fusion logic, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR) |
+| License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
+| Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
 | Model persistence      | joblib (sklearn models + scalers), native PyTorch `state_dict` (LSTM) |
 | Training dataset       | [UCI Metro Interstate Traffic Volume](https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume) (~40k hourly readings, 2012–2018) |
 | Version control        | Git, hosted on GitHub |
@@ -327,37 +331,50 @@ python speed_estimation.py "<stream .m3u8 URL>" --lane-width-px 40 --limit-mph 6
 
 ## e-Challan simulation (demo only)
 
-`src/echallan.py` generates a mock traffic violation notice for a vehicle
-Speed check flagged as speeding, styled after India's e-challan system
-(the public term for an electronic traffic fine). This exists purely to
-demonstrate how a detection pipeline could feed into a citation workflow —
-**it is not connected to any government system, vehicle registry, or
-payment processor, and issues no real legal obligation.** Every generated
-document carries a prominent disclaimer banner saying exactly this.
+`src/echallan.py` shows what an illustrative fine **would have been** for a
+vehicle Speed check flagged as speeding, styled after India's e-challan
+system (the public term for an electronic traffic fine). This exists purely
+to demonstrate how a detection pipeline could feed into a citation
+workflow — **no real citation is issued and no fine is charged. It is not
+connected to any government system, vehicle registry, or payment
+processor.** Every generated summary carries a prominent disclaimer banner
+saying exactly this, and the wording throughout ("fine that would have
+applied ... not charged") is deliberately informational rather than
+looking like a real, actionable document.
 
-Two things it deliberately does **not** do, both by design:
+**Optional automatic license plate recognition** (`src/anpr.py`, via
+EasyOCR — pure Python, no external OCR binary needed): click **🔍 Try plate
+recognition** to attempt reading the selected vehicle's plate from the live
+frame; the result (or an honest "couldn't read it" if OCR found nothing
+confident) prefills the editable vehicle-number field, clearly marked as
+auto-detected with its confidence so it's never mistaken for a verified
+reading. **Verified real-world limitation**: on this project's actual live
+camera footage, plates are frequently illegible or not visible at all —
+nighttime footage is too blurry/low-light, and even in a clear daytime
+traffic photo, most vehicles' rear plates are occluded by neighboring
+vehicles or captured from an angle that doesn't show the plate. A synthetic
+clear-text sanity check confirms the OCR mechanism itself works correctly
+(occasionally confusing visually similar characters like 0/O — a known,
+generic OCR limitation, not a bug here); real footage returning "not
+readable" is the expected common case, not a malfunction. See
+`tests/test_anpr.py`.
 
-1. **No automatic license plate recognition.** The vehicle number is a
-   manual, optional text field the user types in themselves — the app never
-   attempts to read a real plate from the live camera frame. Automatically
-   harvesting real vehicles' plate numbers from live public infrastructure
-   without authorization isn't something this project does, demo or not.
-2. **No real fine schedule.** The illustrative fine amounts reference
-   India's Motor Vehicles (Amendment) Act, 2019, Section 183 (public law
-   that does set over-speeding penalties), scaled by vehicle class
-   (two-wheeler/car vs. bus/truck) and whether the vehicle was more than
-   20mph over the limit — but the actual amount, "aggravated" threshold, and
-   applicability are illustrative choices for this demo, not a real legal
-   determination.
+The illustrative fine amounts reference India's Motor Vehicles (Amendment)
+Act, 2019, Section 183 (public law that does set over-speeding penalties),
+scaled by vehicle class (two-wheeler/car vs. bus/truck) and whether the
+vehicle was more than 20mph over the limit — but the actual amount, the
+"aggravated" threshold, and applicability are illustrative choices for this
+demo, not a real legal determination.
 
 `generate_challan` refuses to run on a vehicle that wasn't actually flagged
-as speeding (raises `ValueError`) — a challan should never be generated for
-a non-violation, even in a simulation. Issued (simulated) challans are
-logged locally to `models/echallan_log.json` (gitignored, not committed) so
-the dashboard's "Challan history" can show what's been generated during
-that install; nothing is sent anywhere. No standalone CLI — it's driven from
-the dashboard's Speed check results; see `tests/test_echallan.py` for
-direct usage of `generate_challan`/`compute_fine`/`render_challan_html`.
+as speeding (raises `ValueError`) — a summary should never be generated for
+a non-violation, even in a simulation. Issued (simulated) records are logged
+locally to `models/echallan_log.json` (gitignored, not committed) so the
+dashboard's "Challan history" can show what's been generated during that
+install; nothing is sent anywhere, and no plate text is retained beyond
+this local file. No standalone CLI — it's driven from the dashboard's Speed
+check results; see `tests/test_echallan.py` and `tests/test_anpr.py` for
+direct usage of the underlying functions.
 
 ---
 
@@ -423,8 +440,9 @@ src/
   live_cameras.py     browse/fetch real public Caltrans CCTV camera snapshots + stream URLs
   live_predict.py     fuses CV output + trained models -> congestion label
   speed_estimation.py multi-frame vehicle tracking + speed estimation from live video
-  echallan.py         simulated e-challan (violation notice) generator, no ANPR
+  anpr.py             optional license plate OCR (EasyOCR) on a vehicle's cropped region
+  echallan.py         simulated "fine would have been" summary generator
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
-tests/                pytest suite (fusion logic, data pipeline, live inference, speed math, e-challan)
+tests/                pytest suite (fusion logic, data pipeline, live inference, speed math, e-challan, ANPR)
 app.py                Streamlit dashboard
 ```

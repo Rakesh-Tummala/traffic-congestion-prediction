@@ -1,4 +1,5 @@
 """Tests for the simulated e-challan generator — pure logic, no live data needed."""
+import json
 import os
 import sys
 
@@ -6,7 +7,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from echallan import DISCLAIMER, compute_fine, generate_challan, render_challan_html  # noqa: E402
+import echallan  # noqa: E402
+from echallan import DISCLAIMER, compute_fine, generate_challan, load_log, render_challan_html  # noqa: E402
 
 
 def _speeding_result(cls_name="car", speed_mph=80.0, over_mph=15.0):
@@ -70,3 +72,23 @@ def test_render_challan_html_includes_disclaimer_and_key_fields():
     assert "XY12Z9999" in html
     assert challan.challan_id in html
     assert "80.0" in html
+
+
+def test_load_log_backfills_missing_fields_from_older_log_entries(tmp_path, monkeypatch):
+    """Regression test: a log file written before plate_auto_detected/
+    plate_confidence existed must not crash load_log() — reproduces a real
+    KeyError hit in the dashboard against a genuinely older log file."""
+    old_style_entry = {
+        "challan_id": "DEMO-OLDONE000", "issued_at": "2026-01-01T00:00:00",
+        "camera_name": "Old Camera", "vehicle_class": "car", "vehicle_number": "OLD123",
+        "speed_mph": 80.0, "speed_limit_mph": 65.0, "over_mph": 15.0, "fine_inr": 1000,
+        "legal_reference": "old ref",
+        # no plate_auto_detected / plate_confidence keys — as an old log would have
+    }
+    log_path = tmp_path / "echallan_log.json"
+    log_path.write_text(json.dumps([old_style_entry]))
+    monkeypatch.setattr(echallan, "LOG_PATH", str(log_path))
+
+    log = load_log()
+    assert log[0]["plate_auto_detected"] is False
+    assert log[0]["plate_confidence"] == 0.0

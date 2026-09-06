@@ -26,6 +26,7 @@ from live_predict import (  # noqa: E402
 )
 from speed_estimation import US_LANE_WIDTH_M, annotate_speeds, check_speeds  # noqa: E402
 from echallan import DISCLAIMER as ECHALLAN_DISCLAIMER, append_to_log, generate_challan, load_log, render_challan_html  # noqa: E402
+from anpr import read_plate  # noqa: E402
 
 LEVEL_COLORS = {"Low": "#22c55e", "Moderate": "#eab308", "High": "#f97316", "Severe": "#ef4444"}
 MODEL_LABELS = {"linear_regression": "Linear Regression", "svr": "SVR", "lstm": "LSTM"}
@@ -401,23 +402,47 @@ with mode_single:
                                        f"vehicle(s) estimated over the "
                                        f"{st.session_state.get('speed_result_limit_mph'):.0f} mph limit.")
 
-                            st.markdown("###### Generate e-challan (simulated)")
+                            st.markdown("###### What the fine would have been (simulated)")
                             st.caption(ECHALLAN_DISCLAIMER)
-                            ec1, ec2 = st.columns([2, 1])
+                            veh_labels = [f"{r['cls_name'].title()} — {r['speed_mph']:.0f} mph "
+                                          f"(+{r['over_mph']:.0f} over)" for r in speeding_results]
+                            veh_choice = st.selectbox("Vehicle", range(len(speeding_results)),
+                                                      format_func=lambda i: veh_labels[i], key="echallan_vehicle")
+
+                            ec1, ec2 = st.columns([1, 2])
                             with ec1:
-                                veh_labels = [f"{r['cls_name'].title()} — {r['speed_mph']:.0f} mph "
-                                              f"(+{r['over_mph']:.0f} over)" for r in speeding_results]
-                                veh_choice = st.selectbox("Vehicle", range(len(speeding_results)),
-                                                          format_func=lambda i: veh_labels[i], key="echallan_vehicle")
+                                if st.button("🔍 Try plate recognition"):
+                                    with st.spinner("Reading plate (first run downloads an OCR model, ~30s)..."):
+                                        plate_result = read_plate(speed_result["frames"][-1],
+                                                                  speeding_results[veh_choice]["last_box"])
+                                    st.session_state["_echallan_ocr_text"] = plate_result["text"]
+                                    st.session_state["_echallan_ocr_conf"] = plate_result["confidence"]
+                                    if plate_result["text"]:
+                                        st.session_state["echallan_plate"] = plate_result["text"]
                             with ec2:
                                 vehicle_number = st.text_input("Vehicle number (optional)", key="echallan_plate")
 
-                            if st.button("Generate e-challan"):
+                            if st.session_state.get("_echallan_ocr_text"):
+                                st.caption(f"✅ Auto-detected: {st.session_state['_echallan_ocr_text']} "
+                                          f"(confidence {st.session_state.get('_echallan_ocr_conf', 0):.2f}) — "
+                                          "unverified, double-check before using; edit above if wrong.")
+                            elif "_echallan_ocr_conf" in st.session_state:
+                                st.caption("⚠️ Could not read a plate automatically from this frame — a common "
+                                          "outcome on this footage (nighttime blur, occlusion, viewing angle; "
+                                          "see README). Enter the vehicle number manually if known.")
+
+                            is_auto = bool(st.session_state.get("_echallan_ocr_text")) and \
+                                vehicle_number == st.session_state.get("_echallan_ocr_text")
+                            plate_conf = st.session_state.get("_echallan_ocr_conf", 0.0) if is_auto else 0.0
+
+                            if st.button("Generate summary"):
                                 challan = generate_challan(
                                     speeding_results[veh_choice],
                                     st.session_state.get("speed_result_cam_name") or "Unknown camera",
                                     st.session_state.get("speed_result_limit_mph"),
                                     vehicle_number=vehicle_number,
+                                    plate_auto_detected=is_auto,
+                                    plate_confidence=plate_conf,
                                 )
                                 append_to_log(challan)
                                 st.session_state["last_challan_html"] = render_challan_html(challan)
@@ -430,7 +455,7 @@ with mode_single:
                                 if log:
                                     st.dataframe(
                                         pd.DataFrame(log)[["challan_id", "issued_at", "camera_name", "vehicle_class",
-                                                          "vehicle_number", "speed_mph", "fine_inr"]],
+                                                          "vehicle_number", "plate_auto_detected", "speed_mph", "fine_inr"]],
                                         hide_index=True, use_container_width=True,
                                     )
                                 else:

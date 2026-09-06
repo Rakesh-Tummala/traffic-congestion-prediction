@@ -1,27 +1,30 @@
-"""Generate a simulated e-challan (traffic violation notice) for a vehicle
-flagged as speeding by speed_estimation.check_speeds().
+"""Show what a traffic fine WOULD HAVE BEEN for a vehicle flagged as speeding
+by speed_estimation.check_speeds() — purely informational, never an actual
+charge.
 
-This is an educational/demo feature only: it produces a document styled like
-an Indian e-challan (the fine schedule below references India's Motor
-Vehicles (Amendment) Act, 2019, Section 183, which publicly sets penalties
-for over-speeding) purely to illustrate how a detection pipeline could feed
-into a citation workflow. It is NOT connected to any government system,
-vehicle registry, or payment processor; issues no real legal obligation; and
-does not perform automatic license plate recognition — the vehicle number is
-a manual, optional field the user types in themselves. Every generated
-document carries a prominent "SIMULATED" banner and this same disclaimer.
+This is an educational/demo feature only: it reports what a citation styled
+after India's e-challan system would show (the fine schedule below
+references India's Motor Vehicles (Amendment) Act, 2019, Section 183, which
+publicly sets penalties for over-speeding) purely to illustrate how a
+detection pipeline could feed into a citation workflow. No real citation is
+issued and no fine is charged — it is not connected to any government
+system, vehicle registry, or payment processor. The vehicle number can come
+from src/anpr.py's automatic plate-recognition attempt (clearly marked as
+such, with its confidence) or be typed in manually; either way it's never
+harvested or stored beyond this local, gitignored log. Every generated
+document carries a prominent disclaimer banner restating all of this.
 """
 import json
 import os
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import MISSING, asdict, dataclass, fields
 from datetime import datetime
 from html import escape
 
 DISCLAIMER = (
-    "SIMULATED DOCUMENT — FOR DEMONSTRATION / EDUCATIONAL PURPOSES ONLY. "
-    "Not issued by any government authority, not connected to any real vehicle "
-    "registry or payment system, and not a legally valid or payable fine."
+    "SIMULATED — SHOWS WHAT THE FINE WOULD HAVE BEEN, FOR DEMONSTRATION / EDUCATIONAL "
+    "PURPOSES ONLY. No real citation was issued and no fine was charged. Not connected to "
+    "any government authority, vehicle registry, or payment system."
 )
 
 # Illustrative only — India's Motor Vehicles (Amendment) Act, 2019, Section 183
@@ -50,6 +53,8 @@ class Challan:
     over_mph: float
     fine_inr: int
     legal_reference: str
+    plate_auto_detected: bool = False
+    plate_confidence: float = 0.0
 
 
 def compute_fine(vehicle_class: str, over_mph: float) -> tuple[int, str]:
@@ -61,7 +66,8 @@ def compute_fine(vehicle_class: str, over_mph: float) -> tuple[int, str]:
 
 
 def generate_challan(speed_result: dict, camera_name: str, speed_limit_mph: float,
-                      vehicle_number: str = "") -> Challan:
+                      vehicle_number: str = "", plate_auto_detected: bool = False,
+                      plate_confidence: float = 0.0) -> Challan:
     """Build a Challan from one entry of speed_estimation.check_speeds()'s
     `results` list. Raises ValueError if the vehicle wasn't actually flagged
     as speeding — a challan should never be generated for a non-violation."""
@@ -80,11 +86,17 @@ def generate_challan(speed_result: dict, camera_name: str, speed_limit_mph: floa
         over_mph=round(speed_result["over_mph"], 1),
         fine_inr=fine_inr,
         legal_reference=legal_ref,
+        plate_auto_detected=plate_auto_detected,
+        plate_confidence=round(plate_confidence, 3),
     )
 
 
 def render_challan_html(challan: Challan) -> str:
     c = challan
+    if c.plate_auto_detected:
+        plate_note = f"auto-detected, confidence {c.plate_confidence:.2f} — unverified"
+    else:
+        plate_note = "entered manually"
     return f"""
 <div style="border:2px solid #ef4444;border-radius:10px;padding:16px;font-family:sans-serif;
 max-width:480px;background:#1a0f0f;">
@@ -92,18 +104,19 @@ max-width:480px;background:#1a0f0f;">
   padding:6px;border-radius:6px;margin-bottom:12px;font-size:12px;letter-spacing:0.5px;">
     {escape(DISCLAIMER)}
   </div>
-  <h3 style="margin:0 0 8px 0;color:#f3f4f6;">e-Challan (Simulated)</h3>
+  <h3 style="margin:0 0 8px 0;color:#f3f4f6;">Speed Violation Summary (Simulated)</h3>
   <table style="width:100%;color:#d1d5db;font-size:14px;border-collapse:collapse;">
-    <tr><td style="padding:3px 0;opacity:0.7;">Challan No.</td><td><b>{escape(c.challan_id)}</b></td></tr>
-    <tr><td style="padding:3px 0;opacity:0.7;">Issued</td><td>{escape(c.issued_at)}</td></tr>
+    <tr><td style="padding:3px 0;opacity:0.7;">Reference No.</td><td><b>{escape(c.challan_id)}</b></td></tr>
+    <tr><td style="padding:3px 0;opacity:0.7;">Recorded</td><td>{escape(c.issued_at)}</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Location</td><td>{escape(c.camera_name)}</td></tr>
-    <tr><td style="padding:3px 0;opacity:0.7;">Vehicle</td><td>{escape(c.vehicle_class.title())} — {escape(c.vehicle_number)}</td></tr>
+    <tr><td style="padding:3px 0;opacity:0.7;">Vehicle</td><td>{escape(c.vehicle_class.title())} — {escape(c.vehicle_number)}
+    <div style="font-size:11px;opacity:0.6;">({escape(plate_note)})</div></td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Violation</td><td>Over-speeding</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Detected speed</td><td>{c.speed_mph:.1f} mph</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Speed limit</td><td>{c.speed_limit_mph:.0f} mph</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Over limit by</td><td>{c.over_mph:.1f} mph</td></tr>
-    <tr><td style="padding:3px 0;opacity:0.7;">Fine (illustrative)</td><td><b>₹{c.fine_inr}</b></td></tr>
-    <tr><td style="padding:3px 0;opacity:0.7;">Reference</td><td style="font-size:12px;">{escape(c.legal_reference)}</td></tr>
+    <tr><td style="padding:3px 0;opacity:0.7;">Fine that would have applied</td><td><b>₹{c.fine_inr}</b> (not charged)</td></tr>
+    <tr><td style="padding:3px 0;opacity:0.7;">Reference law</td><td style="font-size:12px;">{escape(c.legal_reference)}</td></tr>
   </table>
 </div>
 """
@@ -113,7 +126,15 @@ def _load_log() -> list[dict]:
     if not os.path.exists(LOG_PATH):
         return []
     with open(LOG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        entries = json.load(f)
+    # Backfill fields added after some entries were already logged (e.g.
+    # plate_auto_detected/plate_confidence) so older log files don't crash
+    # code that expects every Challan field to be present.
+    defaults = {f.name: f.default for f in fields(Challan) if f.default is not MISSING}
+    for entry in entries:
+        for key, default in defaults.items():
+            entry.setdefault(key, default)
+    return entries
 
 
 def append_to_log(challan: Challan) -> None:
