@@ -298,6 +298,19 @@ better, as confirmed during development). And because live traffic is
 genuinely dynamic, results vary run to run on the same camera — sometimes
 zero vehicles are trackable, sometimes several.
 
+**Not every camera with a working snapshot has a working video stream**:
+confirmed against a real camera during use — "I-5 (14) SB 5 to WB 10 CONN"
+is marked in-service and its snapshot loads fine, but its stream URL
+returns a 404. Caltrans's `inService` flag apparently reflects the
+snapshot system, not necessarily the separate streaming backend, and the
+two aren't always in sync. Two things guard against this: the error is
+caught and reported clearly rather than crashing (pick a different camera
+and try again), and `capture_frame_burst` runs under a hard timeout in a
+worker thread — a dead stream that hangs at the connection level rather
+than failing fast (confirmed: some do) can't block the app indefinitely,
+even though OpenCV's own configurable timeout properties turned out not to
+reliably fire for every failure mode during testing.
+
 ```bash
 cd src
 python speed_estimation.py "<stream .m3u8 URL>" --lane-width-px 40 --limit-mph 65 --save-annotated out.jpg

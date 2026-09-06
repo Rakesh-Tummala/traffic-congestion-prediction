@@ -17,6 +17,7 @@ an approximation, not a certified measurement.
 """
 import argparse
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 import cv2
 import numpy as np
@@ -28,17 +29,21 @@ MPS_TO_MPH = 2.2369362920544
 MPS_TO_KMH = 3.6
 
 
-def capture_frame_burst(stream_url: str, num_frames: int = 6, sample_every: int = 4, timeout_s: float = 15.0):
-    """Read frames from a live HLS stream, keeping every `sample_every`-th
-    decoded frame. Timestamps come from the stream's own internal clock
-    (CAP_PROP_POS_MSEC), not wall-clock read time: an HLS source can hand
-    over an already-buffered segment far faster than real time, so measuring
-    elapsed time via time.time() between reads massively overestimates
-    speed (confirmed during development — reads of a ~1.5s burst completed
-    in under 20ms of wall-clock time)."""
-    cap = cv2.VideoCapture(stream_url)
-    if not cap.isOpened():
-        raise ValueError(f"Could not open video stream: {stream_url}")
+def _capture_frame_burst_blocking(stream_url: str, num_frames: int, sample_every: int, timeout_s: float):
+    cap = cv2.VideoCapture()
+    # Best-effort — confirmed during development that this backend doesn't
+    # reliably honor these for every failure mode (a dead stream took 19s to
+    # fail with a 5s timeout set), which is why capture_frame_burst also
+    # wraps this whole call in a hard thread-based deadline below.
+    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, int(timeout_s * 1000))
+    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, int(timeout_s * 1000))
+    if not cap.open(stream_url):
+        raise ValueError(
+            "Could not open video stream — this camera may not have an active "
+            "live feed even though its snapshot works (confirmed: some in-service "
+            "cameras' stream URLs 404 while their snapshot URL is fine). Try a "
+            "different camera."
+        )
 
     frames = []
     i = 0
@@ -58,6 +63,33 @@ def capture_frame_burst(stream_url: str, num_frames: int = 6, sample_every: int 
     if len(frames) < 2:
         raise ValueError(f"Only captured {len(frames)} frame(s) from the stream; need at least 2 to estimate speed.")
     return frames
+
+
+def capture_frame_burst(stream_url: str, num_frames: int = 6, sample_every: int = 4, timeout_s: float = 15.0):
+    """Read frames from a live HLS stream, keeping every `sample_every`-th
+    decoded frame. Timestamps come from the stream's own internal clock
+    (CAP_PROP_POS_MSEC), not wall-clock read time: an HLS source can hand
+    over an already-buffered segment far faster than real time, so measuring
+    elapsed time via time.time() between reads massively overestimates
+    speed (confirmed during development — reads of a ~1.5s burst completed
+    in under 20ms of wall-clock time).
+
+    Runs in a worker thread under a hard deadline (roughly double `timeout_s`,
+    to give the best-effort in-call timeouts above room to fire first): a
+    stream that hangs at the network/connection level rather than failing
+    fast can otherwise block far longer than any OpenCV-level timeout
+    setting actually enforces, which would hang the whole app — confirmed
+    this can happen against a real dead stream during development.
+    """
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_capture_frame_burst_blocking, stream_url, num_frames, sample_every, timeout_s)
+        try:
+            return future.result(timeout=timeout_s * 2)
+        except FutureTimeoutError:
+            raise ValueError(
+                f"Timed out after {timeout_s * 2:.0f}s trying to read the video stream. "
+                "This camera's stream may be unresponsive right now — try again or pick a different camera."
+            ) from None
 
 
 def detect_vehicles(frame: np.ndarray, conf: float = 0.25) -> list[dict]:
