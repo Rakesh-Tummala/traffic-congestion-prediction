@@ -27,6 +27,7 @@ from live_predict import (  # noqa: E402
 from speed_estimation import US_LANE_WIDTH_M, annotate_speeds, check_speeds  # noqa: E402
 from echallan import DISCLAIMER as ECHALLAN_DISCLAIMER, append_to_log, generate_challan, load_log, render_challan_html  # noqa: E402
 from anpr import read_plate  # noqa: E402
+from vehicle_attributes import describe_vehicle  # noqa: E402
 
 LEVEL_COLORS = {"Low": "#22c55e", "Moderate": "#eab308", "High": "#f97316", "Severe": "#ef4444"}
 MODEL_LABELS = {"linear_regression": "Linear Regression", "svr": "SVR", "lstm": "LSTM"}
@@ -388,14 +389,41 @@ with mode_single:
                         st.image(cv2.cvtColor(annotated_speed_frame, cv2.COLOR_BGR2RGB),
                                   caption=f"{st.session_state.get('speed_result_cam_name')} — tracked vehicle speeds",
                                   use_container_width=True)
-                        speed_df = pd.DataFrame([
-                            {"Vehicle": r["cls_name"], "Speed (mph)": round(r["speed_mph"], 1),
-                             "Speed (km/h)": round(r["speed_kmh"], 1),
-                             "Over limit (mph)": round(r["over_mph"], 1) if r["speeding"] else 0,
-                             "Speeding": "Yes" if r["speeding"] else "No"}
-                            for r in sorted(speed_result["results"], key=lambda r: -r["speed_mph"])
-                        ])
+                        if st.button("🎨 Identify vehicle color & type"):
+                            with st.spinner("Analyzing vehicle appearance (first run downloads a "
+                                             "model, ~30s)..."):
+                                st.session_state["vehicle_attrs"] = [
+                                    describe_vehicle(speed_result["frames"][-1], r["last_box"])
+                                    for r in speed_result["results"]
+                                ]
+                                st.session_state["vehicle_attrs_for"] = id(speed_result)
+
+                        vehicle_attrs = None
+                        if st.session_state.get("vehicle_attrs_for") == id(speed_result):
+                            vehicle_attrs = st.session_state.get("vehicle_attrs")
+
+                        rows = []
+                        for i, r in enumerate(speed_result["results"]):
+                            row = {"Vehicle": r["cls_name"], "Speed (mph)": round(r["speed_mph"], 1),
+                                   "Speed (km/h)": round(r["speed_kmh"], 1),
+                                   "Over limit (mph)": round(r["over_mph"], 1) if r["speeding"] else 0,
+                                   "Speeding": "Yes" if r["speeding"] else "No"}
+                            if vehicle_attrs is not None:
+                                attrs = vehicle_attrs[i]
+                                row["Color (best guess)"] = attrs["color"] or "unclear"
+                                row["Body type (best guess)"] = (
+                                    f"{attrs['type']} ({attrs['type_confidence']:.0%} conf.)"
+                                    if attrs["type"] else "unclear"
+                                )
+                            rows.append(row)
+                        speed_df = pd.DataFrame(
+                            sorted(rows, key=lambda r: -r["Speed (mph)"])
+                        )
                         st.dataframe(speed_df, hide_index=True, use_container_width=True)
+                        if vehicle_attrs is not None:
+                            st.caption("Color and body type are best-effort guesses from a general-purpose "
+                                       "model (not trained on traffic cameras) — expect them to be wrong "
+                                       "sometimes, especially at night or on small/distant vehicles.")
                         speeding_results = [r for r in speed_result["results"] if r["speeding"]]
                         if speeding_results:
                             st.warning(f"{len(speeding_results)} of {len(speed_result['results'])} tracked "

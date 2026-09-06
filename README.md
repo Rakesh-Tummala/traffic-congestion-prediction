@@ -88,8 +88,9 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (31 tests: fusion logic, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR) |
+| Testing                | pytest (44 tests: fusion logic, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
+| Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
 | Model persistence      | joblib (sklearn models + scalers), native PyTorch `state_dict` (LSTM) |
 | Training dataset       | [UCI Metro Interstate Traffic Volume](https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume) (~40k hourly readings, 2012–2018) |
@@ -378,6 +379,38 @@ direct usage of the underlying functions.
 
 ---
 
+## Vehicle color & body type (best-effort, demo only)
+
+`src/vehicle_attributes.py` adds a **🎨 Identify vehicle color & type**
+button to the Speed check results table, showing a best-effort color and
+body-style guess for each tracked vehicle alongside its speed:
+
+- **Color** is read as the dominant paint color from the vehicle's bounding
+  box: pixels are clustered by color (k-means) after filtering out very
+  dark pixels (shadows, tinted glass, tires) and very bright pixels
+  (glare/reflections), which otherwise dominate a naive clustering and
+  produce the wrong color — verified against a real daytime SUV crop, where
+  clustering all pixels picked a dark window/tire gray while the filtered
+  version correctly picked the actual white body paint.
+- **Body type** (sedan / SUV / pickup truck / hatchback / minivan / bus /
+  truck / motorcycle) comes from a zero-shot pass through CLIP
+  (`openai/clip-vit-base-patch32`), matching the vehicle crop against a
+  fixed list of body-style text prompts. CLIP is a general-purpose
+  image/text model, not trained on traffic cameras, so this is a guess with
+  a confidence score shown alongside it (verified manually on real daytime
+  crops: correct but only ~30-55% confidence; expect it to do worse on
+  small or nighttime crops), not a reliable classification.
+- **No make/model identification** (e.g. "Toyota Camry") is included: at
+  the resolution these public traffic cameras deliver, badges and grille
+  details aren't legible, and guessing a specific make/model from body
+  shape alone would be more misleading than useful for a project meant to
+  demonstrate a pipeline, not fabricate a confident-looking wrong answer.
+
+Results are cached per speed-check run in session state so re-rendering the
+table doesn't re-run the model. See `tests/test_vehicle_attributes.py`.
+
+---
+
 ## Setup
 
 ```bash
@@ -442,7 +475,8 @@ src/
   speed_estimation.py multi-frame vehicle tracking + speed estimation from live video
   anpr.py             optional license plate OCR (EasyOCR) on a vehicle's cropped region
   echallan.py         simulated "fine would have been" summary generator
+  vehicle_attributes.py  best-effort color (k-means) + body type (CLIP) identification
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
-tests/                pytest suite (fusion logic, data pipeline, live inference, speed math, e-challan, ANPR)
+tests/                pytest suite (fusion logic, data pipeline, live inference, speed math, e-challan, ANPR, vehicle attrs)
 app.py                Streamlit dashboard
 ```

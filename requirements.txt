@@ -17,3 +17,4 @@ requests==2.34.2
 Pillow==12.3.0
 pytest==9.1.1
 easyocr==1.7.2
+transformers==5.16.1
