@@ -24,6 +24,7 @@ from live_predict import (  # noqa: E402
     CONGESTION_LEVELS, MODELS_DIR, build_feature_row, calibrated_label, congestion_bins,
     forecast_day, fuse_labels, predict_all_models,
 )
+from speed_estimation import US_LANE_WIDTH_M, annotate_speeds, check_speeds  # noqa: E402
 
 LEVEL_COLORS = {"Low": "#22c55e", "Moderate": "#eab308", "High": "#f97316", "Severe": "#ef4444"}
 MODEL_LABELS = {"linear_regression": "Linear Regression", "svr": "SVR", "lstm": "LSTM"}
@@ -164,6 +165,8 @@ with mode_single:
         st.subheader("1. Camera frame")
         tab_live, tab_upload, tab_url = st.tabs(["Live Caltrans camera", "Upload image", "Snapshot URL"])
         frame = None
+        live_stream_url = None  # only set when the current frame came from a live Caltrans camera
+        live_cam_name = None
 
         with tab_live:
             st.caption("Real, currently in-service Caltrans traffic cameras — "
@@ -195,10 +198,16 @@ with mode_single:
                         try:
                             frame = load_frame(cam["image_url"])
                             st.session_state["live_frame"] = frame
+                            st.session_state["live_frame_stream_url"] = cam.get("stream_url", "")
+                            st.session_state["live_frame_cam_name"] = cam["name"]
                         except Exception as e:
                             st.error(f"Could not load frame: {e}")
                     elif "live_frame" in st.session_state:
                         frame = st.session_state["live_frame"]
+
+                    if frame is not None:
+                        live_stream_url = st.session_state.get("live_frame_stream_url")
+                        live_cam_name = st.session_state.get("live_frame_cam_name")
                 else:
                     st.info("No cameras match that filter.")
 
@@ -207,12 +216,14 @@ with mode_single:
             if uploaded is not None:
                 image = Image.open(uploaded).convert("RGB")
                 frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+                live_stream_url = None  # an uploaded image has no associated live video stream
 
         with tab_url:
             url = st.text_input("Live camera snapshot URL (public DOT traffic cam, etc.)")
             if url:
                 try:
                     frame = load_frame(url)
+                    live_stream_url = None  # an arbitrary snapshot URL has no known video stream
                 except Exception as e:
                     st.error(f"Could not load frame: {e}")
 
@@ -302,6 +313,58 @@ with mode_single:
             st.altair_chart(forecast_chart(forecast_df, now.hour, congestion_bins()), use_container_width=True)
             st.caption(f"Predicted volume across today using {MODEL_LABELS[model_choice]}, "
                        "weather held at the conditions set above. White dot marks the current hour.")
+
+            st.markdown("##### Speed check (experimental)")
+            if not live_stream_url:
+                st.caption("Only available for a live Caltrans camera (needs its video stream, not a static "
+                           "image) — pick one from the Live Caltrans camera tab and fetch a snapshot first.")
+            else:
+                st.caption(
+                    "Grabs a ~1.5s live video burst and tracks vehicles across frames to estimate speed. "
+                    "There's no published camera calibration, so speed depends on the lane-width estimate "
+                    "below — treat results as approximate, not a certified measurement."
+                )
+                sc1, sc2, sc3 = st.columns(3)
+                with sc1:
+                    lane_width_px = st.number_input("Lane width in this frame (pixels)", min_value=5.0,
+                                                    value=40.0, step=1.0,
+                                                    help="Measure one traffic lane's width on the image above, in pixels.")
+                with sc2:
+                    lane_width_m = st.number_input("Real lane width (meters)", min_value=1.0,
+                                                   value=US_LANE_WIDTH_M, step=0.1,
+                                                   help="US standard freeway lane width is ~3.7m.")
+                with sc3:
+                    speed_limit_mph = st.number_input("Speed limit (mph)", min_value=5.0, value=65.0, step=5.0)
+
+                if st.button("Check speeds"):
+                    meters_per_pixel = lane_width_m / lane_width_px
+                    with st.spinner("Capturing live video burst and tracking vehicles..."):
+                        try:
+                            speed_result = check_speeds(live_stream_url, meters_per_pixel, speed_limit_mph)
+                        except Exception as e:
+                            st.error(f"Speed check failed: {e}")
+                            speed_result = None
+
+                    if speed_result is not None:
+                        if not speed_result["results"]:
+                            st.info("No vehicles could be tracked across the burst — try again "
+                                    "(traffic is dynamic) or pick a busier camera.")
+                        else:
+                            annotated_speed_frame = annotate_speeds(speed_result["frames"][-1], speed_result["results"])
+                            st.image(cv2.cvtColor(annotated_speed_frame, cv2.COLOR_BGR2RGB),
+                                      caption=f"{live_cam_name} — tracked vehicle speeds", use_container_width=True)
+                            speed_df = pd.DataFrame([
+                                {"Vehicle": r["cls_name"], "Speed (mph)": round(r["speed_mph"], 1),
+                                 "Speed (km/h)": round(r["speed_kmh"], 1),
+                                 "Over limit (mph)": round(r["over_mph"], 1) if r["speeding"] else 0,
+                                 "Speeding": "Yes" if r["speeding"] else "No"}
+                                for r in sorted(speed_result["results"], key=lambda r: -r["speed_mph"])
+                            ])
+                            st.dataframe(speed_df, hide_index=True, use_container_width=True)
+                            n_speeding = sum(r["speeding"] for r in speed_result["results"])
+                            if n_speeding:
+                                st.warning(f"{n_speeding} of {len(speed_result['results'])} tracked vehicle(s) "
+                                           f"estimated over the {speed_limit_mph:.0f} mph limit.")
 
 # ---------------------------------------------------------------- monitoring grid
 with mode_grid:

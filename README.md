@@ -44,6 +44,14 @@ all wrapped in a Streamlit dashboard.
    - **Today's forecast** — predicted volume for every hour of the day, with
      the four congestion bands shaded and the current hour marked, so you can
      see whether right now is unusual for this time of day.
+   - **Speed check (experimental)** — for a live Caltrans camera only (needs
+     its video stream, not a static image): enter the lane width visible in
+     the frame in pixels (real lane width defaults to the US standard
+     3.7m), a speed limit, and click **Check speeds** to grab a short live
+     video burst, track vehicles across it, and estimate each one's speed —
+     flagging any more than 5mph over the limit. See
+     [Speed estimation](#speed-estimation-experimental) below for how this
+     works and its real limitations.
 
 There's also a **🗂️ Monitoring grid** tab (top-level, next to "🔍 Single
 camera") for checking several cameras at once: pick a district, how many
@@ -65,12 +73,13 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Language               | Python 3.11 |
 | Classical ML           | scikit-learn — `LinearRegression`, `SVR` (rbf kernel, tuned via `RandomizedSearchCV` + `TimeSeriesSplit`), `StandardScaler` |
 | Deep learning          | PyTorch — custom `TrafficLSTM` (2-layer LSTM + linear head), CPU inference |
-| Computer vision        | Ultralytics **YOLOv8s** (pretrained on COCO) for vehicle detection, OpenCV for frame I/O |
+| Computer vision        | Ultralytics **YOLOv8s** (pretrained on COCO) for vehicle detection, OpenCV for frame I/O and video capture |
+| Speed estimation       | Custom nearest-centroid multi-frame tracker + pixel/time-to-speed conversion (`src/speed_estimation.py`), reading live HLS video via OpenCV |
 | Data handling          | pandas, NumPy |
-| Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key |
+| Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
-| Charts / visualization | Altair (24h forecast chart), pydeck (camera location map), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (12 tests: fusion logic, feature pipeline, live inference) |
+| Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
+| Testing                | pytest (19 tests: fusion logic, feature pipeline, live inference, speed-tracking math) |
 | Model persistence      | joblib (sklearn models + scalers), native PyTorch `state_dict` (LSTM) |
 | Training dataset       | [UCI Metro Interstate Traffic Volume](https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume) (~40k hourly readings, 2012–2018) |
 | Version control        | Git, hosted on GitHub |
@@ -241,6 +250,61 @@ equivalent, but keeps the pickable layer's accessors fully static.
 
 ---
 
+## Speed estimation (experimental)
+
+`src/speed_estimation.py` estimates vehicle speed and flags speeding
+relative to a posted limit, from a live camera's actual **video stream**
+(HLS `.m3u8`, also published in Caltrans's feed alongside the static
+snapshot) rather than the snapshot used everywhere else in this project.
+That distinction matters: the snapshot only refreshes ~once a minute, so
+two "live" fetches a few seconds apart just return the same cached image —
+there's no motion to measure at all without switching to real video.
+
+**Pipeline**: grab a short burst of frames (`capture_frame_burst`), run
+YOLOv8s detection on each one (`detect_vehicles`), match detections between
+consecutive frames with a simple nearest-centroid tracker
+(`track_across_frames`), then convert each track's pixel displacement over
+time into a real-world speed (`estimate_speed_mps`) using a user-supplied
+meters-per-pixel scale, and compare against the posted limit with a margin
+to absorb noise (`flag_speeding`).
+
+**Two things had to be fixed to make this work at all, both confirmed by
+direct testing**:
+
+1. **Frame timing**: an HLS source can hand over an already-buffered
+   segment far faster than real time — a ~1.5s burst of video was read in
+   under 20ms of wall-clock time during testing. Timing frames by
+   `time.time()` between reads would have overestimated every speed by
+   ~75x. Frames are timestamped from the stream's own internal clock
+   (`cv2.CAP_PROP_POS_MSEC`) instead, which tracks the footage's real
+   elapsed time regardless of how fast it's downloaded.
+2. **Calibration**: there is no published camera calibration for any of
+   these cameras, so pixel displacement can't be converted to real-world
+   distance automatically. Rather than guess, the app asks for a lane
+   width in pixels (measured by eye on the displayed frame) and a real
+   lane width in meters (defaults to the US standard 3.7m) and derives
+   meters-per-pixel from that ratio. This is an approximation the user
+   controls, not an automatic measurement — treat resulting speeds
+   accordingly, not as a certified reading.
+
+**Known limitations**: the tracker is deliberately simple — greedy
+nearest-centroid matching with no re-identification after a missed frame
+and no handling of vehicles crossing paths, adequate for a short burst with
+a handful of well-separated cars but not for dense, fast-crossing traffic.
+It inherits the same low-light detection limitation as the rest of the
+project (verified: a dim/empty-looking camera can track zero vehicles even
+when cars are technically present — a well-lit, busier camera works much
+better, as confirmed during development). And because live traffic is
+genuinely dynamic, results vary run to run on the same camera — sometimes
+zero vehicles are trackable, sometimes several.
+
+```bash
+cd src
+python speed_estimation.py "<stream .m3u8 URL>" --lane-width-px 40 --limit-mph 65 --save-annotated out.jpg
+```
+
+---
+
 ## Setup
 
 ```bash
@@ -300,9 +364,10 @@ src/
   train_regression.py Linear Regression + SVR (+ seasonal_profile for live fallback)
   train_dl.py         LSTM (PyTorch), validation-based early stopping
   cv_module.py        YOLOv8s vehicle detection/counting
-  live_cameras.py     browse/fetch real public Caltrans CCTV camera snapshots
+  live_cameras.py     browse/fetch real public Caltrans CCTV camera snapshots + stream URLs
   live_predict.py     fuses CV output + trained models -> congestion label
+  speed_estimation.py multi-frame vehicle tracking + speed estimation from live video
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
-tests/                pytest suite (fusion logic, data pipeline, live inference)
+tests/                pytest suite (fusion logic, data pipeline, live inference, speed math)
 app.py                Streamlit dashboard
 ```

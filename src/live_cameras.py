@@ -42,6 +42,7 @@ def fetch_cameras(district: int, in_service_only: bool = True, timeout: int = 15
             "longitude": loc.get("longitude"),
             "in_service": in_service,
             "image_url": cctv.get("imageData", {}).get("static", {}).get("currentImageURL", ""),
+            "stream_url": cctv.get("imageData", {}).get("streamingVideoURL", ""),
         })
     return [c for c in cameras if c["image_url"]]
 
