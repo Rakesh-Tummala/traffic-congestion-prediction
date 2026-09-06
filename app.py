@@ -164,6 +164,19 @@ with mode_single:
     with col_input:
         st.subheader("1. Camera frame")
         tab_live, tab_upload, tab_url = st.tabs(["Live Caltrans camera", "Upload image", "Snapshot URL"])
+        # Streamlit renders every tab's body on every rerun regardless of which
+        # tab is visually active — a tab's *widgets* keep their last value
+        # (leftover text in the URL box, a still-attached upload) even while
+        # the user is interacting with a different tab. Without explicit
+        # "which source acted most recently" tracking, whichever tab's block
+        # happens to run last in the script (URL, here) would silently
+        # re-fetch its stale input and overwrite whatever the user just did
+        # in another tab — confirmed happening during testing: leftover text
+        # in the Snapshot URL box kept overriding a fresh Live-camera fetch on
+        # every single rerun. `frame_source` is only updated on a genuinely
+        # new action (button click / new upload / changed URL text), and only
+        # that source's frame is used below.
+        st.session_state.setdefault("frame_source", None)
         frame = None
         live_stream_url = None  # only set when the current frame came from a live Caltrans camera
         live_cam_name = None
@@ -196,16 +209,15 @@ with mode_single:
 
                     if st.button("Fetch live snapshot", type="primary"):
                         try:
-                            frame = load_frame(cam["image_url"])
-                            st.session_state["live_frame"] = frame
+                            st.session_state["live_frame"] = load_frame(cam["image_url"])
                             st.session_state["live_frame_stream_url"] = cam.get("stream_url", "")
                             st.session_state["live_frame_cam_name"] = cam["name"]
+                            st.session_state["frame_source"] = "live"
                         except Exception as e:
                             st.error(f"Could not load frame: {e}")
-                    elif "live_frame" in st.session_state:
-                        frame = st.session_state["live_frame"]
 
-                    if frame is not None:
+                    if st.session_state["frame_source"] == "live" and "live_frame" in st.session_state:
+                        frame = st.session_state["live_frame"]
                         live_stream_url = st.session_state.get("live_frame_stream_url")
                         live_cam_name = st.session_state.get("live_frame_cam_name")
                 else:
@@ -214,18 +226,35 @@ with mode_single:
         with tab_upload:
             uploaded = st.file_uploader("Traffic camera image", type=["jpg", "jpeg", "png"])
             if uploaded is not None:
-                image = Image.open(uploaded).convert("RGB")
-                frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-                live_stream_url = None  # an uploaded image has no associated live video stream
+                # file_uploader keeps returning the same file across reruns until
+                # the user removes/replaces it; only treat it as a fresh action
+                # (and switch the active source to it) the first time this
+                # particular upload's id is seen.
+                if st.session_state.get("_last_upload_id") != uploaded.file_id:
+                    st.session_state["_last_upload_id"] = uploaded.file_id
+                    st.session_state["frame_source"] = "upload"
+
+                if st.session_state["frame_source"] == "upload":
+                    image = Image.open(uploaded).convert("RGB")
+                    frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+                    live_stream_url = None  # an uploaded image has no associated live video stream
 
         with tab_url:
             url = st.text_input("Live camera snapshot URL (public DOT traffic cam, etc.)")
             if url:
-                try:
-                    frame = load_frame(url)
+                # Same idea as the uploader: the text box keeps returning the
+                # same string across reruns, so only (re)fetch when it's new.
+                if st.session_state.get("_last_seen_url") != url:
+                    st.session_state["_last_seen_url"] = url
+                    try:
+                        st.session_state["url_frame"] = load_frame(url)
+                        st.session_state["frame_source"] = "url"
+                    except Exception as e:
+                        st.error(f"Could not load frame: {e}")
+
+                if st.session_state["frame_source"] == "url" and "url_frame" in st.session_state:
+                    frame = st.session_state["url_frame"]
                     live_stream_url = None  # an arbitrary snapshot URL has no known video stream
-                except Exception as e:
-                    st.error(f"Could not load frame: {e}")
 
         st.subheader("2. Conditions")
         c1, c2 = st.columns(2)
