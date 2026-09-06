@@ -20,9 +20,10 @@ all wrapped in a Streamlit dashboard.
    ```
 2. **Give it a camera frame** — pick one of three tabs under "1. Camera frame":
    - **Live Caltrans camera** (recommended): choose a district, optionally
-     filter by route/location, pick a camera from the dropdown — the map
-     shows where it is (selected one highlighted in red) — then click
-     **Fetch live snapshot** to pull the current real image.
+     filter by route/location, then either **click a point directly on the
+     map** or use the dropdown — the two stay in sync in either direction, and
+     the selected camera is highlighted in red. Click **Fetch live snapshot**
+     to pull the current real image.
    - **Upload image**: any traffic photo (JPG/PNG).
    - **Snapshot URL**: paste a direct image URL (any public traffic cam).
 3. **Set conditions** — temperature, rain/snow, cloud cover, weather type,
@@ -43,6 +44,13 @@ all wrapped in a Streamlit dashboard.
    - **Today's forecast** — predicted volume for every hour of the day, with
      the four congestion bands shaded and the current hour marked, so you can
      see whether right now is unusual for this time of day.
+
+There's also a **🗂️ Monitoring grid** tab (top-level, next to "🔍 Single
+camera") for checking several cameras at once: pick a district, how many
+cameras to check (1-16), optional shared weather assumptions, and hit
+**Load grid** — each camera gets its own live detection, annotated
+thumbnail, and congestion badge, plus a summary count of how many are
+Low/Moderate/High/Severe.
 
 Command-line equivalents (no dashboard) are documented further down under
 [Run computer vision on a single frame](#run-computer-vision-on-a-single-frame)
@@ -210,6 +218,26 @@ The CV density heuristic also reads occupancy purely from bounding-box area,
 so an extreme close-up of a single vehicle can misread as "Severe" the same
 as a genuinely packed road — not an issue for its intended input (a
 roadside/overhead camera with a fixed wide field of view), but worth noting.
+Occasionally a fetched camera returns Caltrans's own "Temporarily
+Unavailable" placeholder image (a real camera outage on their end); the
+pipeline still runs on it without crashing, it just correctly finds 0
+vehicles.
+
+**A genuinely tricky bug, for anyone extending the map**: the click-to-select
+map (`app.camera_picker_map`) initially didn't register clicks at all, even
+though panning and zoom-scrolling worked fine on the same canvas — proving
+mouse events *were* reaching deck.gl, just not triggering its picking
+(hit-test) path specifically. Isolating it took a from-scratch minimal
+`st.pydeck_chart` repro matching Streamlit's own documented example, which
+worked, then diffing that against this app's version piece by piece. The
+cause: `get_fill_color`/`get_radius` referencing **per-row DataFrame
+columns** (`get_fill_color=["r","g","b","a"]`, one row highlighted red to
+show the current selection) silently breaks picking — the layer still
+renders correctly, but click events never populate a selection. Switching
+those two accessors to **static, non-per-row values** fixed it immediately.
+The selected-camera highlight is instead drawn with a second, separate
+single-row `ScatterplotLayer` on top (`pickable=False`) — visually
+equivalent, but keeps the pickable layer's accessors fully static.
 
 ---
 
