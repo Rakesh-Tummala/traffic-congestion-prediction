@@ -22,13 +22,18 @@ all wrapped in a Streamlit dashboard.
    - **Live Caltrans camera** (recommended): choose a district, optionally
      filter by route/location, then either **click a point directly on the
      map** or use the dropdown — the two stay in sync in either direction, and
-     the selected camera is highlighted in red. Click **Fetch live snapshot**
-     to pull the current real image.
+     the selected camera is highlighted in red. Map points are also colored
+     by their last-known congestion level from this install's history (gray
+     = never checked yet). Click **Fetch live snapshot** to pull the current
+     real image, **🌤️ Use real weather here** to auto-fill conditions below
+     from this camera's actual location (free, no API key — see
+     [below](#real-weather-live-auto-refresh-map-coloring-error-bands-and-reports)),
+     or check **🔴 Auto-refresh** to keep re-fetching it on a timer.
    - **Upload image**: any traffic photo (JPG/PNG).
    - **Snapshot URL**: paste a direct image URL (any public traffic cam).
 3. **Set conditions** — temperature, rain/snow, cloud cover, weather type,
    holiday flag. These feed the historical model; leave them at sensible
-   defaults if you just want a quick look.
+   defaults if you just want a quick look, or use the real-weather button above.
 4. **Pick which model drives the forecast** — LSTM (most accurate, R²=0.977),
    SVR, or Linear Regression. All three run regardless; this just picks which
    one's label feeds the final fused result and the forecast chart.
@@ -37,7 +42,9 @@ all wrapped in a Streamlit dashboard.
    prediction than the default seasonal-average fallback.
 6. **Read the result**:
    - A color-coded **congestion badge** (green→red) — the final answer.
-   - The **detected-vehicles image** with bounding boxes drawn.
+   - The **detected-vehicles image** with bounding boxes drawn, plus an
+     **⬇️ Download report** button that saves the frame and a summary panel
+     as one shareable PNG.
    - **Vehicle count** and **image density ratio** from the live frame.
    - **All three models** compared side by side (predicted volume, R²,
      level) — not just the one you picked.
@@ -62,8 +69,9 @@ all wrapped in a Streamlit dashboard.
      simple trend chart of predicted volume over time. Logged once per fresh
      camera fetch (not on every slider tweak), stored locally and gitignored.
    - **Today's forecast** — predicted volume for every hour of the day, with
-     the four congestion bands shaded and the current hour marked, so you can
-     see whether right now is unusual for this time of day.
+     the four congestion bands shaded, a shaded ± typical-error band around
+     the line (this model's own held-out test-set MAE), and the current hour
+     marked, so you can see whether right now is unusual for this time of day.
    - **🕒 When should I leave?** — pick a planned departure hour and how
      flexible you are (±1-6h); it checks that window against the forecast
      above and suggests a nearby hour with lower predicted congestion, if one
@@ -121,12 +129,14 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (58 tests: fusion/anomaly/departure logic, explainability, prediction history, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (66 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
 | Explainability          | `src/explain.py` — exact coefficient breakdown for Linear Regression, training-distribution deviation (z-score) proxy for SVR/LSTM |
-| Prediction history      | `src/prediction_log.py` — local, gitignored JSON log of predictions per camera, powering the "Recent history" trend chart |
+| Prediction history      | `src/prediction_log.py` — local, gitignored JSON log of predictions per camera, powering the "Recent history" trend chart and the map's congestion coloring |
+| Real weather            | `src/weather.py` — Open-Meteo (free, no API key), fetched from the selected camera's real coordinates |
+| Downloadable report     | `src/report.py` — composes the annotated frame + a summary panel into a single PNG |
 | Model persistence      | joblib (sklearn models + scalers), native PyTorch `state_dict` (LSTM) |
 | Training dataset       | [UCI Metro Interstate Traffic Volume](https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume) (48,204 hourly readings, 2012–2018) |
 | Version control        | Git, hosted on GitHub |
@@ -491,6 +501,52 @@ and `tests/test_prediction_log.py`.
 
 ---
 
+## Real weather, live auto-refresh, map coloring, error bands, and reports
+
+Five more features, all built from data the app already has access to —
+no new external services beyond one free weather API:
+
+- **🌤️ Use real weather here** (`src/weather.py`) — fetches the selected
+  camera's actual current conditions from Open-Meteo (free, no API key)
+  using its real latitude/longitude, and auto-fills the temperature, rain,
+  snow, cloud cover, and weather-type inputs instead of requiring manual
+  entry. Every field is clamped to that widget's valid range and cast to
+  its declared type before being written into `st.session_state`, since
+  Streamlit raises if a pre-set value falls outside a slider's bounds or
+  mixes int/float with what the widget expects.
+- **🔴 Auto-refresh** — keeps re-fetching the selected live camera on a
+  timer (10-120s, adjustable) using `st.fragment(run_every=...)`, so the
+  view updates on its own instead of requiring a manual re-click. An
+  earlier version of this used a manual `time.sleep()` + `st.rerun()` poll
+  loop instead; that blocked the whole session's script thread while
+  waiting, which starved the browser's own health-check connection and
+  made the UI intermittently flash "Is Streamlit still running?" —
+  confirmed via live testing, and the reason this uses `st.fragment`
+  instead, which reruns independently without blocking anything else.
+  Detection and prediction on ticks that don't fetch a new frame are cheap
+  because `analyze_frame`/`predict_all_models` are wrapped in
+  `st.cache_data`, so an unchanged frame doesn't re-run YOLO or the model.
+- **Congestion-colored map** — the same clickable camera map now colors
+  each point by its last-known congestion level from the local prediction
+  history (gray = never checked yet on this install), via a second,
+  non-pickable pydeck layer drawn under the existing click-target layer —
+  per-row colors are what broke click-picking on the *pickable* layer in
+  earlier testing, but that finding doesn't apply to a layer that's never
+  meant to be clicked.
+- **Forecast error band** (`MODEL_MAE` in `app.py`) — the 24h forecast
+  chart now shades ± each model's own held-out test-set MAE around the
+  line, instead of implying the forecast is exact. MAE was computed once
+  from the already-trained model artifacts (no retraining): 334.2 (Linear
+  Regression), 253.5 (SVR), 202.6 (LSTM) vehicles/hour.
+- **⬇️ Download report** (`src/report.py`) — composes the current camera's
+  annotated frame plus a summary panel (congestion level, vehicle count,
+  timestamp) into a single downloadable PNG, for sharing one specific
+  result without opening the dashboard.
+
+See `tests/test_weather.py` and `tests/test_report.py`.
+
+---
+
 ## Setup
 
 ```bash
@@ -557,9 +613,11 @@ src/
   echallan.py         simulated "fine would have been" summary generator
   vehicle_attributes.py  best-effort color (k-means) + body type (CLIP) identification
   explain.py          per-prediction explanation (exact for Linear Regression, deviation-based for SVR/LSTM)
-  prediction_log.py   local per-camera prediction history log, powers the trend chart
+  prediction_log.py   local per-camera prediction history log, powers the trend chart + map coloring
+  weather.py          real current weather for a camera's coordinates via Open-Meteo (free, no API key)
+  report.py           composes an annotated frame + summary panel into a downloadable PNG
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
-tests/                pytest suite (fusion/anomaly/departure, explainability, prediction history, data pipeline,
-                      live inference, speed math, e-challan, ANPR, vehicle attrs)
+tests/                pytest suite (fusion/anomaly/departure, explainability, prediction history, real weather,
+                      report generation, data pipeline, live inference, speed math, e-challan, ANPR, vehicle attrs)
 app.py                Streamlit dashboard
 ```

@@ -33,10 +33,18 @@ from anpr import read_plate  # noqa: E402
 from vehicle_attributes import describe_vehicle  # noqa: E402
 from prediction_log import load_history, log_prediction  # noqa: E402
 from explain import explain_prediction  # noqa: E402
+from weather import fetch_current_weather  # noqa: E402
+from report import build_report_png  # noqa: E402
 
 LEVEL_COLORS = {"Low": "#22c55e", "Moderate": "#eab308", "High": "#f97316", "Severe": "#ef4444"}
+LEVEL_COLORS_RGB = {"Low": [34, 197, 94], "Moderate": [234, 179, 8], "High": [249, 115, 22], "Severe": [239, 68, 68]}
 MODEL_LABELS = {"linear_regression": "Linear Regression", "svr": "SVR", "lstm": "LSTM"}
 MODEL_R2 = {"linear_regression": 0.948, "svr": 0.960, "lstm": 0.977}
+# Held-out test-set MAE (mean absolute error, in vehicles/hour) for each trained
+# model — computed once from the saved model artifacts, used only to draw an
+# honest "predicted ± typical error" band on the forecast chart rather than
+# implying false precision with a single confident line.
+MODEL_MAE = {"linear_regression": 334.2, "svr": 253.5, "lstm": 202.6}
 MODELS_READY = all(
     os.path.exists(os.path.join(MODELS_DIR, f))
     for f in ("linear_regression.joblib", "svr.joblib", "lstm.pt", "lstm_scalers.joblib", "seasonal_profile.joblib")
@@ -55,6 +63,24 @@ def _cached_forecast(date_str: str, temp_c: float, rain_1h: float, snow_1h: floa
     return forecast_day(base, temp_c, rain_1h, snow_1h, clouds_all, is_holiday, weather_main, model)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_analyze_frame(frame: np.ndarray):
+    # Keyed on the frame's own contents (Streamlit hashes ndarrays), so
+    # unrelated reruns — dragging a weather slider, an auto-refresh poll
+    # tick that isn't due yet — reuse the same detection instead of paying
+    # for YOLO inference again on a frame that hasn't actually changed.
+    return analyze_frame(frame)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_predict_all(now_minute: str, temp_c: float, rain_1h: float, snow_1h: float,
+                         clouds_all: float, is_holiday: int, weather_main: str,
+                         lag_1h: float, lag_3h: float, lag_24h: float):
+    now = datetime.strptime(now_minute, "%Y-%m-%d %H:%M")
+    return predict_all_models(now, temp_c, rain_1h, snow_1h, clouds_all, is_holiday, weather_main,
+                               lag_1h=lag_1h, lag_3h=lag_3h, lag_24h=lag_24h)
+
+
 def congestion_badge(level: str, small: bool = False):
     color = LEVEL_COLORS[level]
     pad, title_size, level_size = ("10px 14px", "11px", "22px") if small else ("18px 24px", "13px", "44px")
@@ -69,7 +95,7 @@ def congestion_badge(level: str, small: bool = False):
     )
 
 
-def forecast_chart(df: pd.DataFrame, current_hour: int, bins: np.ndarray) -> alt.Chart:
+def forecast_chart(df: pd.DataFrame, current_hour: int, bins: np.ndarray, mae: float = None) -> alt.Chart:
     bands = pd.DataFrame({
         "y0": bins[:-1], "y1": bins[1:], "label": CONGESTION_LEVELS,
     })
@@ -78,6 +104,20 @@ def forecast_chart(df: pd.DataFrame, current_hour: int, bins: np.ndarray) -> alt
         color=alt.Color("label:N", scale=alt.Scale(domain=CONGESTION_LEVELS, range=list(LEVEL_COLORS.values())),
                          legend=alt.Legend(title="Congestion level")),
     )
+    chart = band_chart
+
+    if mae is not None:
+        # A single confident-looking line overstates precision — shading
+        # ± the model's own held-out test-set MAE gives an honest sense of
+        # typical error instead of implying the forecast is exact.
+        error_df = df.copy()
+        error_df["low"] = (error_df["volume"] - mae).clip(lower=0)
+        error_df["high"] = error_df["volume"] + mae
+        error_band = alt.Chart(error_df).mark_area(opacity=0.18, color="#38bdf8").encode(
+            x="hour:Q", y="low:Q", y2="high:Q",
+        )
+        chart = chart + error_band
+
     line = alt.Chart(df).mark_line(color="#e5e7eb", strokeWidth=2.5).encode(
         x=alt.X("hour:Q", title="Hour of day", scale=alt.Scale(domain=[0, 23])),
         y=alt.Y("volume:Q", title="Predicted traffic volume"),
@@ -85,14 +125,32 @@ def forecast_chart(df: pd.DataFrame, current_hour: int, bins: np.ndarray) -> alt
     now_point = alt.Chart(df[df["hour"] == current_hour]).mark_point(
         size=160, color="white", filled=True, stroke="black", strokeWidth=2,
     ).encode(x="hour:Q", y="volume:Q", tooltip=["hour", "volume", "label"])
-    return (band_chart + line + now_point).properties(height=280).interactive()
+    return (chart + line + now_point).properties(height=280).interactive()
+
+
+def _hex_to_rgb(hex_color: str) -> list:
+    hex_color = hex_color.lstrip("#")
+    return [int(hex_color[i:i + 2], 16) for i in (0, 2, 4)]
+
+
+def _last_known_labels() -> dict:
+    """camera name -> most recently logged final congestion label, from this
+    install's local prediction history (empty if a camera has never been
+    checked). History is oldest-first, so later entries simply overwrite
+    earlier ones for the same camera, leaving the latest."""
+    latest = {}
+    for entry in load_history(limit=3000):
+        latest[entry["camera_name"]] = entry["final_label"]
+    return latest
 
 
 def camera_picker_map(filtered: list, selected_idx_key: str):
-    """Render a clickable map of `filtered` cameras. Clicking a point selects
-    that camera by writing into st.session_state[selected_idx_key] — the same
-    session-state key the paired selectbox is bound to — so map clicks and
-    dropdown choices stay in sync in either direction."""
+    """Render a clickable map of `filtered` cameras, with each point's color
+    showing its last-known congestion level (gray if never checked yet).
+    Clicking a point selects that camera by writing into
+    st.session_state[selected_idx_key] — the same session-state key the
+    paired selectbox is bound to — so map clicks and dropdown choices stay
+    in sync in either direction."""
     if selected_idx_key not in st.session_state:
         st.session_state[selected_idx_key] = 0
     if st.session_state[selected_idx_key] >= len(filtered):
@@ -111,14 +169,30 @@ def camera_picker_map(filtered: list, selected_idx_key: str):
     if map_df.empty:
         return
 
-    # The pickable layer uses ONLY static (non-per-row) color/radius. A per-row
-    # accessor — either a column of list-valued cells, or separate r/g/b/a
-    # columns referenced as get_fill_color=["r","g","b","a"] — silently breaks
-    # picking (points still render, but clicks never register a selection),
-    # confirmed by isolating this exact cause during development. The
-    # currently-selected camera is instead highlighted with a second, separate
-    # single-row layer drawn on top — visually distinct without touching the
-    # main layer's accessors.
+    # A separate, non-pickable layer carries the per-row congestion colors.
+    # Per-row accessors are exactly what breaks click-picking on the *pickable*
+    # layer below (confirmed during earlier development) — but that finding is
+    # specific to picking, not rendering, so per-row colors are safe here since
+    # this layer never needs to be clicked.
+    latest_labels = _last_known_labels()
+    unknown_rgba = [100, 116, 139, 60]
+    congestion_rows = [
+        {"lat": r["lat"], "lon": r["lon"],
+         "color": (_hex_to_rgb(LEVEL_COLORS[latest_labels[r["name"]]]) + [200]
+                   if r["name"] in latest_labels else unknown_rgba)}
+        for r in rows
+    ]
+    congestion_layer = pdk.Layer(
+        "ScatterplotLayer", id="congestion-colors", data=pd.DataFrame(congestion_rows, dtype=object),
+        get_position=["lon", "lat"],
+        get_fill_color="color",
+        get_radius=350,
+        pickable=False,
+    )
+
+    # The pickable layer uses ONLY static (non-per-row) color/radius — see the
+    # note above. It sits on top of the congestion-color halo as a small,
+    # consistent click target.
     base_layer = pdk.Layer(
         "ScatterplotLayer", id="cameras", data=map_df,
         get_position=["lon", "lat"],
@@ -137,11 +211,13 @@ def camera_picker_map(filtered: list, selected_idx_key: str):
     )
     view = pdk.ViewState(latitude=map_df["lat"].mean(), longitude=map_df["lon"].mean(), zoom=8, controller=True)
     map_state = st.pydeck_chart(
-        pdk.Deck(layers=[base_layer, highlight_layer], initial_view_state=view,
+        pdk.Deck(layers=[congestion_layer, base_layer, highlight_layer], initial_view_state=view,
                  map_style=None, tooltip={"text": "{name}"}),
         on_select="rerun", selection_mode="single-object", key=f"{selected_idx_key}_map",
     )
-    st.caption("Click a point on the map to select that camera, or use the dropdown below.")
+    st.caption("Click a point on the map to select that camera, or use the dropdown below. "
+              "Color shows each camera's last-known congestion level on this install "
+              "(gray = not checked yet).")
 
     selected_objs = map_state.selection.objects.get("cameras", []) if map_state else []
     if selected_objs:
@@ -215,19 +291,77 @@ with mode_single:
                                           format_func=lambda i: labels[i], key="camera_idx")
                     cam = filtered[choice]
 
-                    if st.button("Fetch live snapshot", type="primary"):
-                        try:
-                            st.session_state["live_frame"] = load_frame(cam["image_url"])
-                            st.session_state["live_frame_stream_url"] = cam.get("stream_url", "")
-                            st.session_state["live_frame_cam_name"] = cam["name"]
-                            st.session_state["frame_source"] = "live"
-                        except Exception as e:
-                            st.error(f"Could not load frame: {e}")
+                    fetch_col, weather_col, refresh_col = st.columns([1.3, 1.3, 1])
+                    with fetch_col:
+                        if st.button("Fetch live snapshot", type="primary"):
+                            try:
+                                st.session_state["live_frame"] = load_frame(cam["image_url"])
+                                st.session_state["live_frame_stream_url"] = cam.get("stream_url", "")
+                                st.session_state["live_frame_cam_name"] = cam["name"]
+                                st.session_state["live_frame_cam_lat"] = cam.get("latitude")
+                                st.session_state["live_frame_cam_lon"] = cam.get("longitude")
+                                st.session_state["frame_source"] = "live"
+                            except Exception as e:
+                                st.error(f"Could not load frame: {e}")
+
+                    with weather_col:
+                        if st.button("🌤️ Use real weather here", disabled=not (cam.get("latitude") and cam.get("longitude"))):
+                            try:
+                                real_weather = fetch_current_weather(cam["latitude"], cam["longitude"])
+                                # Clamped to each widget's declared range, and cast to match its
+                                # declared type (the cloud-cover slider is int-typed) — Streamlit
+                                # raises if a pre-set session_state value falls outside a
+                                # slider's bounds or mixes int/float with its declared type.
+                                st.session_state["weather_temp"] = float(np.clip(real_weather["temp_c"], -20.0, 45.0))
+                                st.session_state["weather_rain"] = float(np.clip(real_weather["rain_1h"], 0.0, 100.0))
+                                st.session_state["weather_snow"] = float(np.clip(real_weather["snow_1h"], 0.0, 100.0))
+                                st.session_state["weather_clouds"] = int(np.clip(round(real_weather["clouds_all"]), 0, 100))
+                                st.session_state["weather_main_select"] = real_weather["weather_main"]
+                                st.session_state["_real_weather_fetched"] = True
+                            except Exception as e:
+                                st.error(f"Could not fetch real weather: {e}")
+
+                    with refresh_col:
+                        auto_refresh = st.checkbox("🔴 Auto-refresh", key="auto_refresh_enabled",
+                                                   help="Keep re-fetching this camera automatically.")
+
+                    if st.session_state.get("_real_weather_fetched"):
+                        st.caption("✅ Weather conditions below were auto-filled from this camera's real "
+                                  "location via Open-Meteo (free, no API key) — edit them if you'd rather "
+                                  "set your own.")
+
+                    if auto_refresh:
+                        refresh_secs = st.slider("Refresh every (seconds)", 10, 120, 30, key="auto_refresh_secs")
 
                     if st.session_state["frame_source"] == "live" and "live_frame" in st.session_state:
                         frame = st.session_state["live_frame"]
                         live_stream_url = st.session_state.get("live_frame_stream_url")
                         live_cam_name = st.session_state.get("live_frame_cam_name")
+
+                    # Auto-refresh uses st.fragment(run_every=...) — Streamlit's own
+                    # mechanism for a piece of the app to re-run itself on a timer without
+                    # blocking the rest of the session. An earlier version of this used a
+                    # manual time.sleep()+st.rerun() poll loop instead; that blocked this
+                    # session's script thread while waiting, which starved the browser's
+                    # health-check connection and made the UI intermittently show "Is
+                    # Streamlit still running?" — confirmed via live testing. st.fragment
+                    # doesn't have that problem since it reruns independently.
+                    if auto_refresh and frame is not None:
+                        st.caption(f"🔴 Live — auto-refreshing this camera every {refresh_secs}s")
+
+                        @st.fragment(run_every=f"{refresh_secs}s", key="live_camera_auto_refresh")
+                        def _auto_refresh_tick(cam=cam):
+                            try:
+                                st.session_state["live_frame"] = load_frame(cam["image_url"])
+                                st.session_state["live_frame_stream_url"] = cam.get("stream_url", "")
+                                st.session_state["live_frame_cam_name"] = cam["name"]
+                                st.session_state["live_frame_cam_lat"] = cam.get("latitude")
+                                st.session_state["live_frame_cam_lon"] = cam.get("longitude")
+                            except Exception as e:
+                                st.warning(f"Auto-refresh fetch failed, will retry: {e}")
+                            st.rerun()  # default scope="app": refresh the whole page with the new frame
+
+                        _auto_refresh_tick()
                 else:
                     st.info("No cameras match that filter.")
 
@@ -273,12 +407,12 @@ with mode_single:
         st.subheader("2. Conditions")
         c1, c2 = st.columns(2)
         with c1:
-            temp_c = st.slider("Temperature (°C)", -20.0, 45.0, 20.0)
-            rain_1h = st.number_input("Rain last hour (mm)", 0.0, 100.0, 0.0)
-            snow_1h = st.number_input("Snow last hour (mm)", 0.0, 100.0, 0.0)
+            temp_c = st.slider("Temperature (°C)", -20.0, 45.0, 20.0, key="weather_temp")
+            rain_1h = st.number_input("Rain last hour (mm)", 0.0, 100.0, 0.0, key="weather_rain")
+            snow_1h = st.number_input("Snow last hour (mm)", 0.0, 100.0, 0.0, key="weather_snow")
         with c2:
-            clouds_all = st.slider("Cloud cover (%)", 0, 100, 20)
-            weather_main = st.selectbox("Weather", list(WEATHER_CODES.keys()))
+            clouds_all = st.slider("Cloud cover (%)", 0, 100, 20, key="weather_clouds")
+            weather_main = st.selectbox("Weather", list(WEATHER_CODES.keys()), key="weather_main_select")
             is_holiday = st.checkbox("Holiday")
 
         model_choice = st.radio(
@@ -304,7 +438,7 @@ with mode_single:
         else:
             with st.spinner("Running vehicle detection..."):
                 try:
-                    cv_result = analyze_frame(frame)
+                    cv_result = _cached_analyze_frame(frame)
                 except Exception as e:
                     st.error(f"Vehicle detection failed: {e}")
                     st.stop()
@@ -313,8 +447,9 @@ with mode_single:
 
             now = datetime.now()
             try:
-                predictions = predict_all_models(now, temp_c, rain_1h, snow_1h, clouds_all, int(is_holiday),
-                                                  weather_main, lag_1h=lag_1h, lag_3h=lag_3h, lag_24h=lag_24h)
+                predictions = _cached_predict_all(now.strftime("%Y-%m-%d %H:%M"), temp_c, rain_1h, snow_1h,
+                                                   clouds_all, int(is_holiday), weather_main,
+                                                   lag_1h, lag_3h, lag_24h)
             except Exception as e:
                 st.error(f"Model prediction failed: {e}")
                 st.stop()
@@ -342,6 +477,14 @@ with mode_single:
                           "ordinary is happening — an accident, event, or road closure — rather than "
                           "normal hour-to-hour variation.")
             st.image(annotated_rgb, caption="Detected vehicles", use_container_width=True)
+            st.download_button(
+                "⬇️ Download report (PNG)",
+                data=build_report_png(cv_result["annotated_frame"], camera_name_for_log, final_label,
+                                      cv_result["vehicle_count"], cv_result["density_ratio"],
+                                      MODEL_LABELS[model_choice]),
+                file_name=f"congestion_report_{now.strftime('%Y%m%d_%H%M%S')}.png",
+                mime="image/png",
+            )
 
             m1, m2 = st.columns(2)
             m1.metric("Vehicle count", cv_result["vehicle_count"])
@@ -409,9 +552,12 @@ with mode_single:
             st.markdown("##### Today's forecast")
             forecast_df = _cached_forecast(now.strftime("%Y-%m-%d"), temp_c, rain_1h, snow_1h,
                                             clouds_all, int(is_holiday), weather_main, model_choice)
-            st.altair_chart(forecast_chart(forecast_df, now.hour, congestion_bins()), use_container_width=True)
+            st.altair_chart(forecast_chart(forecast_df, now.hour, congestion_bins(), mae=MODEL_MAE[model_choice]),
+                             use_container_width=True)
             st.caption(f"Predicted volume across today using {MODEL_LABELS[model_choice]}, "
-                       "weather held at the conditions set above. White dot marks the current hour.")
+                       "weather held at the conditions set above. White dot marks the current hour; "
+                       f"shaded band shows ±{MODEL_MAE[model_choice]:.0f} vehicles/hour, this model's "
+                       "typical error on held-out test data.")
 
             with st.expander("🕒 When should I leave?"):
                 st.caption("Uses today's forecast above to suggest a nearby hour with lower predicted "
