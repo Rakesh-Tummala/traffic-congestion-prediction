@@ -246,6 +246,11 @@ with mode_single:
                     image = Image.open(uploaded).convert("RGB")
                     frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
                     live_stream_url = None  # an uploaded image has no associated live video stream
+                    # ...and no camera identity either: tab_live runs first each rerun and can set
+                    # live_cam_name from *last* rerun's frame_source before this block updates it —
+                    # without this explicit reset a switch to Upload can still log under the
+                    # previously-selected live camera's name (found via live testing).
+                    live_cam_name = None
 
         with tab_url:
             url = st.text_input("Live camera snapshot URL (public DOT traffic cam, etc.)")
@@ -263,6 +268,7 @@ with mode_single:
                 if st.session_state["frame_source"] == "url" and "url_frame" in st.session_state:
                     frame = st.session_state["url_frame"]
                     live_stream_url = None  # an arbitrary snapshot URL has no known video stream
+                    live_cam_name = None  # explicit reset — see the comment in tab_upload above
 
         st.subheader("2. Conditions")
         c1, c2 = st.columns(2)
