@@ -166,6 +166,40 @@ def fuse_labels(model_label: str, cv_label: str) -> str:
     return max([model_label, cv_label], key=CONGESTION_LEVELS.index)
 
 
+def congestion_mismatch(model_label: str, cv_label: str) -> int:
+    """Severity-level gap between the historical model's label and the live
+    camera's label (0 = they agree)."""
+    return abs(CONGESTION_LEVELS.index(model_label) - CONGESTION_LEVELS.index(cv_label))
+
+
+def detect_anomaly(model_label: str, cv_label: str, threshold: int = 2) -> bool:
+    """Flag a likely real-world incident (accident, event, closure) rather than
+    normal variation: the live camera reading differs sharply from what
+    history expects for this hour. The default threshold of 2 means e.g.
+    Low-vs-High or Moderate-vs-Severe, not just a one-level day-to-day wobble
+    (which fuse_labels already handles by trusting the worse signal)."""
+    return congestion_mismatch(model_label, cv_label) >= threshold
+
+
+def recommend_departure(forecast_df: pd.DataFrame, target_hour: int, flexibility_hours: int = 2) -> dict:
+    """Within [target_hour - flexibility_hours, target_hour + flexibility_hours]
+    (wrapping around midnight), find the hour with the lowest predicted
+    congestion in that day's forecast — a simple "when should I leave"
+    recommendation built from the same 24h forecast already shown to the user,
+    no new model needed."""
+    window_hours = [(target_hour + offset) % 24 for offset in range(-flexibility_hours, flexibility_hours + 1)]
+    window_df = forecast_df[forecast_df["hour"].isin(window_hours)]
+    best_row = window_df.loc[window_df["volume"].idxmin()]
+    target_row = forecast_df.loc[forecast_df["hour"] == target_hour].iloc[0]
+    return {
+        "target_hour": target_hour, "target_label": target_row["label"],
+        "target_volume": float(target_row["volume"]),
+        "best_hour": int(best_row["hour"]), "best_label": best_row["label"],
+        "best_volume": float(best_row["volume"]),
+        "improves": CONGESTION_LEVELS.index(best_row["label"]) < CONGESTION_LEVELS.index(target_row["label"]),
+    }
+
+
 def forecast_day(base_date: datetime, temp_c: float, rain_1h: float, snow_1h: float,
                   clouds_all: float, is_holiday: int, weather_main: str, model: str = "lstm") -> pd.DataFrame:
     """Predicted volume for every hour of base_date's calendar day, holding weather

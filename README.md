@@ -41,9 +41,33 @@ all wrapped in a Streamlit dashboard.
    - **Vehicle count** and **image density ratio** from the live frame.
    - **All three models** compared side by side (predicted volume, R²,
      level) — not just the one you picked.
+   - **⚠️ Unusual congestion detected** (when it fires) — shown when the live
+     camera and the historical model disagree sharply (2+ severity levels
+     apart, e.g. Low vs. High). A gap that large usually means something
+     out of the ordinary is happening — an accident, event, or closure —
+     rather than normal hour-to-hour variation, so it's flagged separately
+     from the routine "camera vs. history" mismatches that `fuse_labels`
+     already resolves silently by taking the worse signal.
+   - **🔍 Why this prediction?** — a feature-level explanation. For Linear
+     Regression this is exact: each feature's real coefficient × scaled
+     value, so the contributions genuinely sum to the prediction. SVR and
+     the LSTM aren't linearly decomposable, so for those (and shown as a
+     labeled "deviation" explanation, not claimed as exact) it instead
+     reports which inputs are most unusual right now compared to the
+     historical training distribution — a proxy for "what's different about
+     current conditions," honestly distinguished from the exact version so
+     it's never mistaken for a true per-model attribution.
+   - **📈 Recent history for this camera** — appears once at least two
+     predictions have been logged for the same camera on this install; a
+     simple trend chart of predicted volume over time. Logged once per fresh
+     camera fetch (not on every slider tweak), stored locally and gitignored.
    - **Today's forecast** — predicted volume for every hour of the day, with
      the four congestion bands shaded and the current hour marked, so you can
      see whether right now is unusual for this time of day.
+   - **🕒 When should I leave?** — pick a planned departure hour and how
+     flexible you are (±1-6h); it checks that window against the forecast
+     above and suggests a nearby hour with lower predicted congestion, if one
+     exists — reusing the same forecast already computed, no separate model.
    - **Speed check (experimental)** — for a live Caltrans camera only (needs
      its video stream, not a static image): enter the lane width visible in
      the frame in pixels (real lane width defaults to the US standard
@@ -69,6 +93,15 @@ cameras to check (1-16), optional shared weather assumptions, and hit
 thumbnail, and congestion badge, plus a summary count of how many are
 Low/Moderate/High/Severe.
 
+And a **🛣️ Route** tab for checking several specific cameras together as one
+route/corridor: pick a district, select 2+ cameras (any order — this is a
+set, not a strict path), set shared weather assumptions, and hit **Check
+route**. The overall route reading is always the worst of its segments (the
+same max-severity idea `fuse_labels` uses for one camera, extended across
+several), so a single jammed stretch is never hidden by an otherwise-clear
+route — plus a segment-by-segment breakdown showing which camera is driving
+that result.
+
 Command-line equivalents (no dashboard) are documented further down under
 [Run computer vision on a single frame](#run-computer-vision-on-a-single-frame)
 and [Fused live prediction (CLI)](#fused-live-prediction-cli).
@@ -88,12 +121,14 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (44 tests: fusion logic, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (58 tests: fusion/anomaly/departure logic, explainability, prediction history, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
+| Explainability          | `src/explain.py` — exact coefficient breakdown for Linear Regression, training-distribution deviation (z-score) proxy for SVR/LSTM |
+| Prediction history      | `src/prediction_log.py` — local, gitignored JSON log of predictions per camera, powering the "Recent history" trend chart |
 | Model persistence      | joblib (sklearn models + scalers), native PyTorch `state_dict` (LSTM) |
-| Training dataset       | [UCI Metro Interstate Traffic Volume](https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume) (~40k hourly readings, 2012–2018) |
+| Training dataset       | [UCI Metro Interstate Traffic Volume](https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume) (48,204 hourly readings, 2012–2018) |
 | Version control        | Git, hosted on GitHub |
 
 ---
@@ -411,6 +446,51 @@ table doesn't re-run the model. See `tests/test_vehicle_attributes.py`.
 
 ---
 
+## Anomaly detection, explainability, history, and route congestion
+
+Five smaller features layered on top of the core fusion pipeline — each
+reuses signals the app already computes rather than adding a new model:
+
+- **Anomaly / incident flag** (`detect_anomaly` in `src/live_predict.py`) —
+  `fuse_labels` already resolves small camera-vs-history disagreements by
+  trusting the worse one; a *large* disagreement (2+ severity levels, e.g.
+  Low vs. High) is different in kind, not just degree — it usually means
+  something happened that the historical model has no way to know about
+  (an accident, an event, a closure). That gets its own warning banner
+  instead of silently folding into the routine fusion.
+- **"Why this prediction?"** (`src/explain.py`) — Linear Regression is
+  linearly decomposable, so its explanation is exact: each feature's real
+  coefficient × scaled value, and those contributions genuinely sum to the
+  prediction. SVR (RBF kernel) and the LSTM are not linearly decomposable,
+  so for those the app instead reports which inputs are most unusual right
+  now versus the historical training distribution (a z-score). That
+  baseline is computed on a **winsorized** copy of the training data — this
+  dataset has a known data-quality outlier (`rain_1h` includes one row
+  logging 9831mm of rain in a single hour, obviously a sensor/logging
+  error) that otherwise inflates the raw standard deviation enough to make
+  a genuine 50mm downpour look barely unusual. The UI always labels which
+  kind of explanation it's showing rather than presenting the deviation
+  proxy as if it were an exact attribution.
+- **Recent history for this camera** (`src/prediction_log.py`) — every
+  fresh camera fetch (not every slider tweak) is logged locally to a
+  gitignored JSON file, and once a camera has 2+ logged predictions the
+  dashboard shows a simple trend chart. It's a local convenience log for
+  this install, not a real telemetry pipeline.
+- **"When should I leave?"** (`recommend_departure` in
+  `src/live_predict.py`) — reuses the same 24h forecast already shown to
+  the user: given a planned departure hour and a flexibility window, it
+  checks nearby hours and suggests one with lower predicted congestion, if
+  one exists. No new model — just a different read of an existing forecast.
+- **🛣️ Route tab** — combine 2+ cameras into one reading using the same
+  max-severity idea `fuse_labels` uses for a single camera, extended across
+  several: the overall route congestion is always the worst segment, with a
+  per-camera breakdown showing which one is driving that result.
+
+See `tests/test_fusion.py` (anomaly + departure), `tests/test_explain.py`,
+and `tests/test_prediction_log.py`.
+
+---
+
 ## Setup
 
 ```bash
@@ -471,12 +551,15 @@ src/
   train_dl.py         LSTM (PyTorch), validation-based early stopping
   cv_module.py        YOLOv8s vehicle detection/counting
   live_cameras.py     browse/fetch real public Caltrans CCTV camera snapshots + stream URLs
-  live_predict.py     fuses CV output + trained models -> congestion label
+  live_predict.py     fuses CV output + trained models -> congestion label; anomaly flag + departure recommendation
   speed_estimation.py multi-frame vehicle tracking + speed estimation from live video
   anpr.py             optional license plate OCR (EasyOCR) on a vehicle's cropped region
   echallan.py         simulated "fine would have been" summary generator
   vehicle_attributes.py  best-effort color (k-means) + body type (CLIP) identification
+  explain.py          per-prediction explanation (exact for Linear Regression, deviation-based for SVR/LSTM)
+  prediction_log.py   local per-camera prediction history log, powers the trend chart
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
-tests/                pytest suite (fusion logic, data pipeline, live inference, speed math, e-challan, ANPR, vehicle attrs)
+tests/                pytest suite (fusion/anomaly/departure, explainability, prediction history, data pipeline,
+                      live inference, speed math, e-challan, ANPR, vehicle attrs)
 app.py                Streamlit dashboard
 ```

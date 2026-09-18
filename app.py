@@ -1,8 +1,11 @@
 """Streamlit dashboard: pick a real live Caltrans camera (click the map or use
 the dropdown — they stay in sync), upload an image, or paste a snapshot URL;
 set conditions; get vehicle detection plus a fused congestion prediction from
-all three trained models. Also includes a monitoring grid to check several
-cameras at once. Run with: streamlit run app.py"""
+all three trained models, with an anomaly flag, a feature-level explanation,
+a per-camera history trend, and a "when should I leave" recommendation. Also
+includes a monitoring grid to check several cameras at once, and a route tab
+to combine several cameras into one worst-segment-wins reading. Run with:
+streamlit run app.py"""
 import os
 import sys
 from datetime import datetime
@@ -22,12 +25,14 @@ from data_loader import WEATHER_CODES  # noqa: E402
 from live_cameras import DISTRICTS, fetch_cameras  # noqa: E402
 from live_predict import (  # noqa: E402
     CONGESTION_LEVELS, MODELS_DIR, build_feature_row, calibrated_label, congestion_bins,
-    forecast_day, fuse_labels, predict_all_models,
+    detect_anomaly, forecast_day, fuse_labels, predict_all_models, recommend_departure,
 )
 from speed_estimation import US_LANE_WIDTH_M, annotate_speeds, check_speeds  # noqa: E402
 from echallan import DISCLAIMER as ECHALLAN_DISCLAIMER, append_to_log, generate_challan, load_log, render_challan_html  # noqa: E402
 from anpr import read_plate  # noqa: E402
 from vehicle_attributes import describe_vehicle  # noqa: E402
+from prediction_log import load_history, log_prediction  # noqa: E402
+from explain import explain_prediction  # noqa: E402
 
 LEVEL_COLORS = {"Low": "#22c55e", "Moderate": "#eab308", "High": "#f97316", "Severe": "#ef4444"}
 MODEL_LABELS = {"linear_regression": "Linear Regression", "svr": "SVR", "lstm": "LSTM"}
@@ -158,7 +163,7 @@ div[data-testid="stMetricValue"] { font-size: 1.6rem; }
 st.title("🚦 Smart Traffic Congestion Prediction")
 st.caption("Computer vision vehicle counting + Linear Regression / SVR / LSTM, fused with real live traffic cameras.")
 
-mode_single, mode_grid = st.tabs(["🔍 Single camera", "🗂️ Monitoring grid"])
+mode_single, mode_grid, mode_route = st.tabs(["🔍 Single camera", "🗂️ Monitoring grid", "🛣️ Route"])
 
 # ---------------------------------------------------------------- single camera
 with mode_single:
@@ -311,8 +316,25 @@ with mode_single:
             cv_label = congestion_from_density(cv_result["density_ratio"])
             model_label = calibrated_label(predictions[model_choice])
             final_label = fuse_labels(model_label, cv_label)
+            camera_name_for_log = live_cam_name or ("Uploaded image" if st.session_state.get("frame_source") == "upload"
+                                                     else "Snapshot URL")
+
+            # Only log once per genuinely new frame (not on every rerun caused
+            # by e.g. dragging a weather slider) — otherwise the trend log
+            # would fill up with near-duplicate entries from the same fetch.
+            st.session_state.setdefault("_logged_for_frame_id", None)
+            if st.session_state["_logged_for_frame_id"] != id(frame):
+                log_prediction(camera_name_for_log, model_choice, predictions[model_choice],
+                               model_label, cv_label, final_label)
+                st.session_state["_logged_for_frame_id"] = id(frame)
 
             congestion_badge(final_label)
+            if detect_anomaly(model_label, cv_label):
+                st.warning("⚠️ **Unusual congestion detected** — the live camera reading differs sharply "
+                          f"from what history expects for this time ({cv_label} vs. an expected "
+                          f"{model_label}). This kind of mismatch often means something out of the "
+                          "ordinary is happening — an accident, event, or road closure — rather than "
+                          "normal hour-to-hour variation.")
             st.image(annotated_rgb, caption="Detected vehicles", use_container_width=True)
 
             m1, m2 = st.columns(2)
@@ -339,12 +361,68 @@ with mode_single:
                 },
             )
 
+            with st.expander("🔍 Why this prediction?"):
+                X_row = build_feature_row(now, temp_c, rain_1h, snow_1h, clouds_all, int(is_holiday),
+                                          weather_main, lag_1h=lag_1h, lag_3h=lag_3h, lag_24h=lag_24h)
+                explanation = explain_prediction(model_choice, X_row)
+                if explanation["kind"] == "exact":
+                    st.caption(f"Exact breakdown for {MODEL_LABELS[model_choice]} — each feature's "
+                              "contribution to the predicted volume, in the model's own scaled units.")
+                    for item in explanation["top_features"]:
+                        direction = "⬆️ increases" if item["contribution"] > 0 else "⬇️ decreases"
+                        st.markdown(f"- **{item['label'].capitalize()}** {direction} the predicted "
+                                    f"volume (contribution: {item['contribution']:+.2f})")
+                else:
+                    st.caption(f"{MODEL_LABELS[model_choice]} doesn't decompose into per-feature "
+                              "contributions directly, so this instead shows which inputs are most "
+                              "unusual right now compared to typical conditions for this dataset — "
+                              "a proxy for what's driving an atypical prediction, not an exact breakdown.")
+                    for item in explanation["top_features"]:
+                        z = item["z_score"]
+                        if abs(z) < 0.5:
+                            st.markdown(f"- **{item['label'].capitalize()}** is close to typical")
+                        else:
+                            direction = "higher" if z > 0 else "lower"
+                            st.markdown(f"- **{item['label'].capitalize()}** is unusually {direction} "
+                                        f"than typical ({abs(z):.1f}σ)")
+
+            camera_history = load_history(camera_name_for_log, limit=100)
+            if len(camera_history) > 1:
+                st.markdown("##### 📈 Recent history for this camera")
+                hist_df = pd.DataFrame(camera_history)
+                hist_df["timestamp"] = pd.to_datetime(hist_df["timestamp"])
+                hist_chart = alt.Chart(hist_df).mark_line(point=True, color="#38bdf8").encode(
+                    x=alt.X("timestamp:T", title="When checked"),
+                    y=alt.Y("volume:Q", title="Predicted volume"),
+                    tooltip=["timestamp:T", "volume:Q", "final_label:N"],
+                ).properties(height=180).interactive()
+                st.altair_chart(hist_chart, use_container_width=True)
+                st.caption(f"{len(camera_history)} prediction(s) logged for this camera on this install "
+                          "(logged once per fresh fetch, not on every slider tweak).")
+
             st.markdown("##### Today's forecast")
             forecast_df = _cached_forecast(now.strftime("%Y-%m-%d"), temp_c, rain_1h, snow_1h,
                                             clouds_all, int(is_holiday), weather_main, model_choice)
             st.altair_chart(forecast_chart(forecast_df, now.hour, congestion_bins()), use_container_width=True)
             st.caption(f"Predicted volume across today using {MODEL_LABELS[model_choice]}, "
                        "weather held at the conditions set above. White dot marks the current hour.")
+
+            with st.expander("🕒 When should I leave?"):
+                st.caption("Uses today's forecast above to suggest a nearby hour with lower predicted "
+                          "congestion, if one exists.")
+                dl1, dl2 = st.columns(2)
+                with dl1:
+                    target_hour = st.slider("Planned departure hour", 0, 23, now.hour, key="depart_hour")
+                with dl2:
+                    flexibility = st.slider("How flexible are you? (± hours)", 1, 6, 2, key="depart_flex")
+                rec = recommend_departure(forecast_df, target_hour, flexibility)
+                if rec["improves"]:
+                    st.success(f"Leaving at **{rec['best_hour']:02d}:00** instead of {target_hour:02d}:00 "
+                              f"would drop you from **{rec['target_label']}** to **{rec['best_label']}** "
+                              "congestion, based on today's forecast.")
+                else:
+                    st.info(f"**{target_hour:02d}:00** is already about as good as it gets within "
+                            f"±{flexibility}h — predicted **{rec['target_label']}** congestion.")
 
             st.markdown("##### Speed check (experimental)")
             if not live_stream_url:
@@ -584,3 +662,102 @@ with mode_grid:
                                 congestion_badge(item["final_label"], small=True)
                                 st.caption(f"{item['result']['vehicle_count']} vehicles · "
                                            f"density {item['result']['density_ratio']}")
+
+# ---------------------------------------------------------------- route congestion
+with mode_route:
+    st.subheader("Check congestion across multiple cameras on your route")
+    st.caption("Pick a district, then select every camera along your route (any order) to get one "
+               "overall reading — always driven by the worst segment, so a single jammed stretch is "
+               "never hidden by an otherwise-clear route.")
+
+    if not MODELS_READY:
+        st.error(f"Trained model artifacts not found in {MODELS_DIR}. Run `python src/evaluate.py` first.")
+    else:
+        rt1, rt2 = st.columns([1, 1])
+        with rt1:
+            route_district = st.selectbox("District", DISTRICTS, index=6, key="route_district",
+                                          format_func=lambda d: f"District {d}")
+        with rt2:
+            route_search = st.text_input("Filter by route / location", key="route_search")
+
+        try:
+            route_cameras = _cached_cameras(route_district)
+        except Exception as e:
+            route_cameras = []
+            st.error(f"Could not reach Caltrans camera feed: {e}")
+
+        if route_search:
+            needle = route_search.lower()
+            route_cameras = [c for c in route_cameras
+                             if needle in c["name"].lower() or needle in c["nearby_place"].lower()]
+
+        if not route_cameras:
+            st.info("No cameras match that filter.")
+        else:
+            route_labels = [f"{c['name']} — {c['nearby_place']}" for c in route_cameras]
+            chosen_idx = st.multiselect("Cameras along your route (pick 2 or more)", range(len(route_cameras)),
+                                        format_func=lambda i: route_labels[i], key="route_choice")
+
+            with st.expander("Weather assumptions (applied to every camera on the route)"):
+                rw1, rw2 = st.columns(2)
+                with rw1:
+                    rt_temp = st.slider("Temperature (°C)", -20.0, 45.0, 20.0, key="route_temp")
+                    rt_rain = st.number_input("Rain last hour (mm)", 0.0, 100.0, 0.0, key="route_rain")
+                with rw2:
+                    rt_clouds = st.slider("Cloud cover (%)", 0, 100, 20, key="route_clouds")
+                    rt_weather = st.selectbox("Weather", list(WEATHER_CODES.keys()), key="route_weather")
+
+            if len(chosen_idx) < 2:
+                st.info("Select at least 2 cameras to build a route.")
+            elif st.button("Check route", type="primary"):
+                selected_cams = [route_cameras[i] for i in chosen_idx]
+                now = datetime.now()
+                try:
+                    model_pred = predict_all_models(now, rt_temp, rt_rain, 0.0, rt_clouds, 0, rt_weather)
+                    hist_label = calibrated_label(model_pred["lstm"])
+                except Exception as e:
+                    st.error(f"Historical model prediction failed: {e}")
+                    hist_label = None
+
+                segment_results = []
+                progress = st.progress(0.0, text="Checking route segments...")
+                for i, c in enumerate(selected_cams):
+                    try:
+                        cam_frame = load_frame(c["image_url"])
+                        cam_result = analyze_frame(cam_frame)
+                        cam_cv_label = congestion_from_density(cam_result["density_ratio"])
+                        cam_final = fuse_labels(hist_label, cam_cv_label) if hist_label else cam_cv_label
+                        segment_results.append({"camera": c, "final_label": cam_final,
+                                                "vehicle_count": cam_result["vehicle_count"], "error": None})
+                    except Exception as e:
+                        segment_results.append({"camera": c, "final_label": None,
+                                                "vehicle_count": None, "error": str(e)})
+                    progress.progress((i + 1) / len(selected_cams), text=f"Checked {i + 1}/{len(selected_cams)}")
+                progress.empty()
+                st.session_state["route_results"] = segment_results
+
+            route_results = st.session_state.get("route_results")
+            if route_results:
+                valid = [r for r in route_results if r["final_label"]]
+                if valid:
+                    route_label = max((r["final_label"] for r in valid), key=CONGESTION_LEVELS.index)
+                    worst_segment = next(r for r in valid if r["final_label"] == route_label)
+                    st.markdown("###### Overall route congestion")
+                    congestion_badge(route_label)
+                    st.caption(f"Driven by the worst segment: **{worst_segment['camera']['name']}**")
+                else:
+                    st.warning("Couldn't read any segment on this route right now.")
+
+                st.markdown("###### Segment-by-segment")
+                for r in route_results:
+                    seg_cols = st.columns([3, 1, 1])
+                    seg_cols[0].markdown(f"**{r['camera']['name']}** — {r['camera']['nearby_place']}")
+                    if r["error"]:
+                        seg_cols[1].caption(f"⚠️ {r['error']}")
+                    else:
+                        seg_cols[1].markdown(f"{r['vehicle_count']} vehicles")
+                        color = LEVEL_COLORS[r["final_label"]]
+                        seg_cols[2].markdown(
+                            f"<span style='color:{color};font-weight:700'>{r['final_label']}</span>",
+                            unsafe_allow_html=True,
+                        )
