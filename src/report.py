@@ -13,7 +13,8 @@ LEVEL_COLORS_RGB = {
     "Low": (34, 197, 94), "Moderate": (234, 179, 8),
     "High": (249, 115, 22), "Severe": (239, 68, 68),
 }
-PANEL_HEIGHT = 140
+PANEL_HEIGHT = 170
+MIN_WIDTH = 640
 BACKGROUND_RGB = (17, 24, 39)
 TEXT_RGB = (229, 231, 235)
 
@@ -35,6 +36,13 @@ def build_report_png(annotated_frame_bgr: np.ndarray, camera_name: str, congesti
     frame_rgb = cv2.cvtColor(annotated_frame_bgr, cv2.COLOR_BGR2RGB)
     frame_img = Image.fromarray(frame_rgb)
     w, h = frame_img.size
+    if w < MIN_WIDTH:
+        # Some Caltrans snapshots are only 320px wide — too narrow for the
+        # summary text below, which got clipped in the first version (found
+        # by opening a downloaded report from a live camera).
+        scale = MIN_WIDTH / w
+        w, h = MIN_WIDTH, round(h * scale)
+        frame_img = frame_img.resize((w, h), Image.LANCZOS)
 
     canvas = Image.new("RGB", (w, h + PANEL_HEIGHT), BACKGROUND_RGB)
     canvas.paste(frame_img, (0, 0))
@@ -49,10 +57,10 @@ def build_report_png(annotated_frame_bgr: np.ndarray, camera_name: str, congesti
     info_lines = [
         camera_name,
         f"{vehicle_count} vehicles detected  ·  density {density_ratio:.4f}  ·  model: {model_name}",
-        f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} — Smart Traffic Congestion Prediction",
+        f"Smart Traffic Congestion Prediction  ·  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
     ]
     for i, line in enumerate(info_lines):
-        draw.text((270, h + 15 + i * 24), line, font=font_small, fill=TEXT_RGB)
+        draw.text((20, h + 78 + i * 24), line, font=font_small, fill=TEXT_RGB)
 
     buf = io.BytesIO()
     canvas.save(buf, format="PNG")

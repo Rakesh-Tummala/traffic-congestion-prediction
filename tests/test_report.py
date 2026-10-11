@@ -8,7 +8,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from report import PANEL_HEIGHT, build_report_png  # noqa: E402
+from report import MIN_WIDTH, PANEL_HEIGHT, build_report_png  # noqa: E402
 
 
 def _sample_frame(w=200, h=100):
@@ -20,11 +20,19 @@ def test_build_report_png_returns_valid_png_bytes():
     assert png_bytes[:8] == b"\x89PNG\r\n\x1a\n"  # PNG file signature
 
 
-def test_build_report_png_adds_panel_below_frame():
-    w, h = 200, 100
+def test_build_report_png_adds_panel_below_wide_frame_without_resizing():
+    w, h = MIN_WIDTH + 160, 480
     png_bytes = build_report_png(_sample_frame(w, h), "Test Camera", "Low", 0, 0.0, "SVR")
     img = Image.open(io.BytesIO(png_bytes))
     assert img.size == (w, h + PANEL_HEIGHT)
+
+
+def test_build_report_png_upscales_narrow_frame_so_text_fits():
+    # Real Caltrans snapshots can be only 320px wide; the summary text below
+    # needs more room than that or it gets clipped.
+    png_bytes = build_report_png(_sample_frame(320, 240), "Test Camera", "Low", 0, 0.0, "SVR")
+    img = Image.open(io.BytesIO(png_bytes))
+    assert img.size == (MIN_WIDTH, 480 + PANEL_HEIGHT)
 
 
 def test_build_report_png_works_for_every_congestion_level():

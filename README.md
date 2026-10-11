@@ -552,7 +552,10 @@ no new external services beyond one free weather API:
 - **⬇️ Download report** (`src/report.py`) — composes the current camera's
   annotated frame plus a summary panel (congestion level, vehicle count,
   timestamp) into a single downloadable PNG, for sharing one specific
-  result without opening the dashboard.
+  result without opening the dashboard. Frames narrower than 640px are
+  upscaled first: some Caltrans snapshots are only 320px wide, and the
+  first version's summary text was clipped on those (found by opening a
+  report downloaded from a live camera).
 
 See `tests/test_weather.py` and `tests/test_report.py`.
 
