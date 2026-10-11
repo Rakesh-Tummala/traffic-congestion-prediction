@@ -22,7 +22,7 @@ all wrapped in a Streamlit dashboard.
    - **Live Caltrans camera** (recommended): choose a district, optionally
      filter by route/location, then either **click a point directly on the
      map** or use the dropdown — the two stay in sync in either direction, and
-     the selected camera is highlighted in red. Map points are also colored
+     the selected camera is circled with a white ring. Map points are also colored
      by their last-known congestion level from this install's history (gray
      = never checked yet). Click **Fetch live snapshot** to pull the current
      real image, **🌤️ Use real weather here** to auto-fill conditions below
@@ -523,6 +523,13 @@ no new external services beyond one free weather API:
   made the UI intermittently flash "Is Streamlit still running?" —
   confirmed via live testing, and the reason this uses `st.fragment`
   instead, which reruns independently without blocking anything else.
+  A second live-testing catch: a fragment's body also runs immediately
+  whenever the full script reaches it, not only on its timer, so the first
+  version (which called `st.rerun()` unconditionally) looped forever —
+  fetch, rerun, fetch — before the prediction section ever rendered. The
+  body now returns early unless a full interval has elapsed since the last
+  fetch. Verified end to end: with a 10s interval, new frames were fetched
+  and logged ~11s apart, and stopped as soon as auto-refresh was unchecked.
   Detection and prediction on ticks that don't fetch a new frame are cheap
   because `analyze_frame`/`predict_all_models` are wrapped in
   `st.cache_data`, so an unchanged frame doesn't re-run YOLO or the model.
@@ -532,7 +539,11 @@ no new external services beyond one free weather API:
   non-pickable pydeck layer drawn under the existing click-target layer —
   per-row colors are what broke click-picking on the *pickable* layer in
   earlier testing, but that finding doesn't apply to a layer that's never
-  meant to be clicked.
+  meant to be clicked. The selected camera is marked with a hollow white
+  ring rather than a filled dot: the first version used a filled red
+  highlight, which covered the congestion color for exactly the camera
+  you'd just checked (found via live testing). The gray click-target dot
+  sits on top of the halo, so colors read slightly muted.
 - **Forecast error band** (`MODEL_MAE` in `app.py`) — the 24h forecast
   chart now shades ± each model's own held-out test-set MAE around the
   line, instead of implying the forecast is exact. MAE was computed once

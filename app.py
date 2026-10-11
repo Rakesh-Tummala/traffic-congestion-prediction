@@ -8,6 +8,7 @@ to combine several cameras into one worst-segment-wins reading. Run with:
 streamlit run app.py"""
 import os
 import sys
+import time
 from datetime import datetime
 
 import altair as alt
@@ -202,11 +203,16 @@ def camera_picker_map(filtered: list, selected_idx_key: str):
         auto_highlight=True,
     )
     selected_row = map_df[map_df["cam_idx"] == current_idx]
+    # A hollow ring, not a filled dot: a filled highlight sits on top of the
+    # congestion-color halo and fully hides it for exactly the camera the
+    # user is looking at (found via live testing).
     highlight_layer = pdk.Layer(
         "ScatterplotLayer", id="selected-camera", data=selected_row,
         get_position=["lon", "lat"],
-        get_color="[239, 68, 68, 230]",
-        get_radius=400,
+        stroked=True, filled=False,
+        get_line_color="[255, 255, 255, 255]",
+        get_radius=600,
+        line_width_min_pixels=3,
         pickable=False,
     )
     view = pdk.ViewState(latitude=map_df["lat"].mean(), longitude=map_df["lon"].mean(), zoom=8, controller=True)
@@ -301,6 +307,7 @@ with mode_single:
                                 st.session_state["live_frame_cam_lat"] = cam.get("latitude")
                                 st.session_state["live_frame_cam_lon"] = cam.get("longitude")
                                 st.session_state["frame_source"] = "live"
+                                st.session_state["_last_auto_fetch_ts"] = time.time()
                             except Exception as e:
                                 st.error(f"Could not load frame: {e}")
 
@@ -332,6 +339,8 @@ with mode_single:
 
                     if auto_refresh:
                         refresh_secs = st.slider("Refresh every (seconds)", 10, 120, 30, key="auto_refresh_secs")
+                    else:
+                        st.session_state.pop("_last_auto_fetch_ts", None)
 
                     if st.session_state["frame_source"] == "live" and "live_frame" in st.session_state:
                         frame = st.session_state["live_frame"]
@@ -349,8 +358,19 @@ with mode_single:
                     if auto_refresh and frame is not None:
                         st.caption(f"🔴 Live — auto-refreshing this camera every {refresh_secs}s")
 
+                        # A fragment's body also runs immediately whenever the full script
+                        # reaches it, not just on its timer — and this one sits in the left
+                        # column, which renders before the prediction column. Without the
+                        # elapsed-time guard below, that first run would fetch + st.rerun()
+                        # unconditionally, looping forever before the prediction section is
+                        # ever reached (found via live testing: page stuck "running", frame
+                        # never updating, nothing logged).
                         @st.fragment(run_every=f"{refresh_secs}s", key="live_camera_auto_refresh")
-                        def _auto_refresh_tick(cam=cam):
+                        def _auto_refresh_tick(cam=cam, refresh_secs=refresh_secs):
+                            last = st.session_state.setdefault("_last_auto_fetch_ts", time.time())
+                            if time.time() - last < refresh_secs * 0.9:
+                                return
+                            st.session_state["_last_auto_fetch_ts"] = time.time()
                             try:
                                 st.session_state["live_frame"] = load_frame(cam["image_url"])
                                 st.session_state["live_frame_stream_url"] = cam.get("stream_url", "")
