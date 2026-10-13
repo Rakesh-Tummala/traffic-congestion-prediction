@@ -113,9 +113,14 @@ same result: an overall reading, a route map, and a segment-by-segment list.
 - **Click the map** — click once for the start and again for the
   destination (a third click starts over); same route + camera discovery.
 
-The overall route reading is always the worst of its segments (the same
-max-severity idea `fuse_labels` uses for one camera, extended across several),
-so a single jammed stretch is never hidden by an otherwise-clear route. The
+Each segment shows that camera's own live reading; the overall route reading
+is the worst live segment fused (max severity, as `fuse_labels` does for one
+camera) with the historical model's label, so a single jammed stretch is never
+hidden by an otherwise-clear route. The historical label is one shared
+prediction for the whole route, so it is applied once to the overall reading
+rather than to every segment (which would floor them all at it). The
+Monitoring grid likewise badges each camera by its live reading and shows the
+historical label once as a caption. The
 **route map** draws the real road path (OSRM, OpenStreetMap routing, free, no
 API key), numbered cameras, and A/B markers when the route came from places or
 clicks. Each stretch of road is colored from the nearest camera's reading:

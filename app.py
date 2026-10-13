@@ -933,18 +933,26 @@ with mode_grid:
                         cam_frame = load_frame(c["image_url"])
                         cam_result = analyze_frame(cam_frame)
                         cam_cv_label = congestion_from_density(cam_result["density_ratio"])
-                        cam_final = fuse_labels(hist_label, cam_cv_label) if hist_label else cam_cv_label
+                        # Badge = this camera's own live reading. The historical model's label is the
+                        # same for every camera, so fusing it in here would floor them all at it
+                        # (an empty road showed "Moderate"). It is shown once, as a caption, below.
                         results.append({"camera": c, "result": cam_result, "cv_label": cam_cv_label,
-                                        "final_label": cam_final, "error": None})
+                                        "final_label": cam_cv_label, "error": None})
                     except Exception as e:
                         results.append({"camera": c, "result": None, "cv_label": None,
                                         "final_label": None, "error": str(e)})
                     progress.progress((i + 1) / len(selected_cams), text=f"Analyzed {i + 1}/{len(selected_cams)}")
                 progress.empty()
                 st.session_state["grid_results"] = results
+                st.session_state["grid_hist_label"] = hist_label
 
             grid_results = st.session_state.get("grid_results")
             if grid_results:
+                grid_hist = st.session_state.get("grid_hist_label")
+                if grid_hist:
+                    st.caption(f"Each badge is that camera's own live reading (vehicle density). The historical "
+                               f"model for this time and weather says **{grid_hist}** for every camera; the "
+                               "Single camera tab shows it fused with the live reading.")
                 severity_counts = pd.Series(
                     [r["final_label"] for r in grid_results if r["final_label"]]
                 ).value_counts().reindex(CONGESTION_LEVELS, fill_value=0)
@@ -993,15 +1001,18 @@ def _run_route_check(cams, weather, route=None, endpoints=None, in_route_order=F
             try:
                 cam_result = analyze_frame(load_frame(c["image_url"]))
                 cam_cv_label = congestion_from_density(cam_result["density_ratio"])
-                cam_final = fuse_labels(hist_label, cam_cv_label) if hist_label else cam_cv_label
-                results.append({"camera": c, "final_label": cam_final,
+                # Per-segment label is the camera's own live reading. The historical model gives one
+                # time/weather prediction shared by every camera, so fusing it in per segment would put
+                # the same floor under all of them (e.g. every segment "Moderate" regardless of vehicles).
+                # It is applied once, to the overall reading, in _show_route_view().
+                results.append({"camera": c, "final_label": cam_cv_label,
                                 "vehicle_count": cam_result["vehicle_count"], "error": None})
             except Exception as e:
                 results.append({"camera": c, "final_label": None, "vehicle_count": None, "error": str(e)})
             progress.progress((i + 1) / len(cams), text=f"Checked {i + 1}/{len(cams)}")
         progress.empty()
     st.session_state["route_view"] = {"results": results, "route": route, "endpoints": endpoints,
-                                      "in_route_order": in_route_order}
+                                      "in_route_order": in_route_order, "hist_label": hist_label}
 
 
 def _check_between(start, end, weather):
@@ -1027,11 +1038,19 @@ def _show_route_view():
 
     valid = [r for r in results if r["final_label"]]
     if valid:
-        route_label = max((r["final_label"] for r in valid), key=CONGESTION_LEVELS.index)
-        worst_segment = next(r for r in valid if r["final_label"] == route_label)
+        live_worst = max((r["final_label"] for r in valid), key=CONGESTION_LEVELS.index)
+        worst_segment = next(r for r in valid if r["final_label"] == live_worst)
+        hist_label = view.get("hist_label")
+        route_label = fuse_labels(hist_label, live_worst) if hist_label else live_worst
         st.markdown("###### Overall route congestion")
         congestion_badge(route_label)
-        st.caption(f"Driven by the worst segment: **{worst_segment['camera']['name']}**")
+        if hist_label:
+            st.caption(f"Worst live camera: **{live_worst}** ({worst_segment['camera']['name']}). "
+                       f"Historical model for this time and weather: **{hist_label}**. "
+                       "The overall reading is the more severe of the two; the segments below show "
+                       "each camera's own live reading.")
+        else:
+            st.caption(f"Driven by the worst segment: **{worst_segment['camera']['name']}**")
     elif results:
         st.warning("Couldn't read any segment on this route right now.")
     else:
