@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 from streamlit_folium import st_folium
 
@@ -34,7 +35,11 @@ from live_predict import (  # noqa: E402
     detect_anomaly, forecast_day, fuse_labels, predict_all_models, recommend_departure,
 )
 from speed_estimation import US_LANE_WIDTH_M, annotate_speeds, check_speeds  # noqa: E402
-from echallan import DISCLAIMER as ECHALLAN_DISCLAIMER, append_to_log, generate_challan, load_log, render_challan_html  # noqa: E402
+from echallan import (  # noqa: E402
+    DISCLAIMER as ECHALLAN_DISCLAIMER, FINE_SCHEDULE_INR, append_to_log, generate_challan, load_log,
+    render_challan_html,
+)
+from live_video import hls_player_html, is_playable_url  # noqa: E402
 from anpr import read_plate  # noqa: E402
 from vehicle_attributes import describe_vehicle  # noqa: E402
 from prediction_log import load_history, log_prediction  # noqa: E402
@@ -368,7 +373,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-mode_single, mode_grid, mode_route = st.tabs(["🔍 Single camera", "🗂️ Monitoring grid", "🛣️ Route"])
+mode_single, mode_grid, mode_route, mode_challan = st.tabs(
+    ["🔍 Single camera", "🗂️ Monitoring grid", "🛣️ Route", "🧾 e-Challan"])
 
 # ---------------------------------------------------------------- single camera
 with mode_single:
@@ -466,6 +472,17 @@ with mode_single:
                         refresh_secs = st.slider("Refresh every (seconds)", 10, 120, 30, key="auto_refresh_secs")
                     else:
                         st.session_state.pop("_last_auto_fetch_ts", None)
+
+                    if is_playable_url(cam.get("stream_url", "")):
+                        if st.checkbox("📹 Watch live video", key="watch_live_video",
+                                       help="Plays this camera's live stream straight from Caltrans in your "
+                                            "browser. Detection and prediction still use the snapshot."):
+                            components.html(hls_player_html(cam["stream_url"]), height=372)
+                            st.caption("Live video plays directly from Caltrans in your browser; many Caltrans "
+                                       "streams are offline at any time. The congestion reading is still computed "
+                                       "from the snapshot below.")
+                    else:
+                        st.caption("📹 This camera has no live video stream; snapshots only.")
 
                     if st.session_state["frame_source"] == "live" and "live_frame" in st.session_state:
                         frame = st.session_state["live_frame"]
@@ -871,6 +888,9 @@ with mode_single:
                                     )
                                 else:
                                     st.caption("No challans generated yet.")
+                        else:
+                            st.caption("No tracked vehicle is over the limit, so there is no challan to simulate. "
+                                       "You can also try the 🧾 e-Challan tab with a made-up vehicle.")
 
 # ---------------------------------------------------------------- monitoring grid
 with mode_grid:
@@ -1228,3 +1248,52 @@ with mode_route:
                 _check_between(pts["start"], pts["end"], weather)
 
         _show_route_view()
+
+
+# ---------------------------------------------------------------- e-challan
+with mode_challan:
+    st.subheader("e-Challan (simulation)")
+    st.warning(ECHALLAN_DISCLAIMER)
+    st.caption("A challan is the document an over-speeding vehicle would receive. In this project the "
+               "pipeline is: live video burst, vehicle tracking, speed estimate, optional plate reading, "
+               "then a challan showing what the fine would have been. Two ways to generate one:")
+    st.markdown("- **From a real tracked vehicle:** 🔍 Single camera, live camera, **Speed check**. If a "
+                "vehicle is over the limit, its challan form appears there.\n"
+                "- **From made-up values (below):** a way to demo the challan itself without waiting for a "
+                "real speeder.")
+
+    with st.form("manual_challan"):
+        mc1, mc2 = st.columns(2)
+        manual_camera = mc1.text_input("Camera / location", value="Demo camera")
+        manual_plate = mc2.text_input("Vehicle number (optional)")
+        mc3, mc4, mc5 = st.columns(3)
+        manual_class = mc3.selectbox("Vehicle type", list(FINE_SCHEDULE_INR), index=list(FINE_SCHEDULE_INR).index("car"))
+        manual_limit = mc4.number_input("Speed limit (mph)", min_value=5.0, value=65.0, step=5.0)
+        manual_speed = mc5.number_input("Recorded speed (mph)", min_value=0.0, value=85.0, step=1.0)
+        generate_manual = st.form_submit_button("Generate demo challan", type="primary")
+
+    if generate_manual:
+        if manual_speed <= manual_limit:
+            st.info("That speed is not over the limit, so no challan is generated. "
+                    "A challan only exists for a vehicle that was over the limit.")
+        else:
+            manual_result = {"speeding": True, "cls_name": manual_class, "speed_mph": manual_speed,
+                             "over_mph": manual_speed - manual_limit}
+            manual_challan = generate_challan(manual_result, f"{manual_camera} (manual demo)", manual_limit,
+                                              vehicle_number=manual_plate)
+            append_to_log(manual_challan)
+            st.session_state["manual_challan_html"] = render_challan_html(manual_challan)
+
+    if st.session_state.get("manual_challan_html"):
+        st.markdown(st.session_state["manual_challan_html"], unsafe_allow_html=True)
+
+    history = load_log()
+    st.markdown(f"###### Challan history ({len(history)} generated on this install)")
+    if history:
+        history_df = pd.DataFrame(history)[["challan_id", "issued_at", "camera_name", "vehicle_class",
+                                            "vehicle_number", "plate_auto_detected", "speed_mph", "fine_inr"]]
+        st.dataframe(history_df, hide_index=True, use_container_width=True)
+        st.download_button("⬇️ Download history (CSV)", history_df.to_csv(index=False).encode("utf-8"),
+                           file_name="challan_history.csv", mime="text/csv")
+    else:
+        st.caption("No challans generated yet.")

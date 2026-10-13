@@ -153,7 +153,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (97 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (101 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -586,6 +586,23 @@ See `tests/test_weather.py` and `tests/test_report.py`.
 
 ---
 
+## Live video and the e-Challan tab
+
+- **Live video.** For cameras that have a video stream (about two thirds of the Caltrans
+  network; many of those streams are offline at any moment), tick **📹 Watch live video**
+  under the camera picker. The stream plays in your own browser straight from Caltrans using
+  hls.js (`src/live_video.py`); nothing is proxied or recorded. The congestion reading
+  is still computed from the snapshot, not from the video. A dead stream shows a
+  message instead of a blank box.
+- **🧾 e-Challan tab.** The simulated challan generator was previously only reachable at the
+  bottom of Single camera, after **Check speeds** found a vehicle over the limit, which
+  rarely happens on a live camera. It now has its own tab: generate a challan from made-up
+  values (vehicle type, limit, recorded speed) to demo the document itself, see the
+  history, and download it as CSV. The real path (tracked vehicle, plate reading, challan)
+  is unchanged. Still a simulation: see the disclaimer in the app and the section above.
+
+---
+
 ## Look and feel
 
 The dashboard uses a dark "traffic control room" theme (`.streamlit/config.toml` for the
@@ -772,6 +789,7 @@ src/
   prediction_log.py   local per-camera prediction history log, powers the trend chart + map coloring
   weather.py          real current weather for a camera's coordinates via Open-Meteo (free, no API key)
   report.py           composes an annotated frame + summary panel into a downloadable PNG
+  live_video.py       embeds a camera's live HLS video stream (hls.js) in the dashboard
   ui_theme.py         the 'traffic control room' look: CSS, animated header, glowing badge, counter, status messages
   route_map.py        geocoding (Nominatim), road path (OSRM), cameras along a route, nearest-camera coloring, map framing
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
