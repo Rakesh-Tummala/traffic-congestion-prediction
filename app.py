@@ -160,7 +160,13 @@ def _limit_caption(info: dict | None, current: float) -> tuple[str, str]:
     """(caption text, limit_source text for the challan) for the limit currently in the box."""
     if info and info["limit_mph"]:
         if abs(current - info["limit_mph"]) < 0.5:
-            return f"🛣️ {info['detail']}", f"OpenStreetMap: {info['detail']}"
+            if info.get("provisional"):
+                return (f"🛣️ {info['detail']}",
+                        f"assumed {info['limit_mph']:.0f} mph: OpenStreetMap was unreachable, so the usual "
+                        "California freeway limit was used, not a posted sign")
+            if info["source"] == "assumed":
+                return f"🛣️ {info['detail']}", f"assumed from OpenStreetMap road class: {info['detail']}"
+            return f"🛣️ {info['detail']}", info["detail"]
         return (f"🛣️ OpenStreetMap suggested {info['limit_mph']:.0f} mph ({info['detail']}) but you changed it.",
                 f"entered manually (OpenStreetMap suggested {info['limit_mph']:.0f} mph)")
     return ("🛣️ Couldn't find this road's limit on OpenStreetMap right now, so it's a manual value.",

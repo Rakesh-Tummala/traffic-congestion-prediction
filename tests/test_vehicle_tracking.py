@@ -117,3 +117,26 @@ def test_speed_scale_matches_the_median_to_the_reference_and_rejects_big_correct
 
 def test_violation_threshold_is_limit_plus_margin():
     assert violation_threshold(65, 15) == 80
+
+
+def test_make_model_ranking_sums_models_into_makes_and_orders_the_top_models():
+    import vehicle_attributes as va
+    probs = [0.0] * len(va.VEHICLE_MODELS)
+    idx = {name: i for i, name in enumerate(va.VEHICLE_MODELS)}
+    probs[idx[("Toyota", "Camry")]] = 0.20
+    probs[idx[("Toyota", "Corolla")]] = 0.25
+    probs[idx[("Honda", "Civic")]] = 0.30
+    rest = (1 - 0.75) / (len(probs) - 3)
+    probs = [p if p else rest for p in probs]
+    ranked = va.rank_makes_and_models(probs)
+    assert ranked["top_models"][0][0] == "Honda Civic"            # best single model
+    assert ranked["make"] == "Toyota"                            # but Toyota's models add up to more
+    assert ranked["make_confidence"] > 0.45
+
+
+def test_make_model_guess_refuses_a_crop_too_small_to_tell_cars_apart_without_loading_clip():
+    import numpy as np
+    import vehicle_attributes as va
+    frame = np.zeros((200, 300, 3), dtype=np.uint8)
+    out = va.guess_make_model(frame, (10, 10, 40, 30))             # 30 px wide
+    assert out["make"] is None and out["model"] is None and "too small" in out["note"]

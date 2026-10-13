@@ -153,7 +153,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (127 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (129 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -623,6 +623,17 @@ Interstate/US routes, and updates itself when the answer arrives), it tries thre
 found limit is remembered on disk so each camera needs only one successful lookup. If a road has no
 tag, a typical value for that road class is used and marked as assumed, not posted. Limits are
 whatever OpenStreetMap contributors entered, so they can be missing or out of date.
+
+**Car make and model: tried, and mostly not possible from these cameras.** `guess_make_model`
+(`src/vehicle_attributes.py`) asks CLIP which of about 70 popular US models a crop looks like.
+Measured on the 162 saved frames: the median detected car is **19 pixels wide**; only 22 of 299
+are 50 px or wider and just 1 is 90 px or wider. On the 20 largest crops (all blurry, mostly seen
+from above or behind) the top guess had 5-15% confidence (one 40%), which is better than the 1.4%
+chance level among 70 options but nowhere near reliable. So the guess is strictly gated: crops
+under 70 px wide are refused outright, and a make or model is only reported when its confidence
+clears a threshold (make 45%, model 30%), which will rarely happen on these cameras. When it does,
+the challan says "possibly a ..." with the confidence. A real make/model feature would need a much
+higher-resolution camera or a classifier trained on car-model photos.
 
 **How the Live monitor's speed works, and why to be skeptical of it.** These cameras publish
 no calibration, so speed is inferred. (1) A flat-road pinhole-camera model is fitted from the

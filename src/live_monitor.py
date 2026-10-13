@@ -255,6 +255,14 @@ class LiveMonitor:
                 attrs = describe_vehicle(frame, box)
                 event["attrs"] = attrs
                 desc = " ".join(p for p in (attrs.get("color"), attrs.get("type")) if p)
+                if cls_name in ("car", "truck"):
+                    from vehicle_attributes import guess_make_model
+                    mm = guess_make_model(frame, box)  # None fields unless the crop is big and CLIP is sure
+                    event["make_model"] = mm
+                    if mm["model"]:
+                        desc += f", possibly a {mm['model']} ({mm['model_confidence']:.0%} confidence)"
+                    elif mm["make"]:
+                        desc += f", possibly a {mm['make']} ({mm['make_confidence']:.0%} confidence)"
                 desc = f"{desc} (best guess)" if desc else ""
             challan = generate_challan(
                 {"speeding": True, "cls_name": cls_name, "speed_mph": mph, "over_mph": mph - self.limit_mph},
