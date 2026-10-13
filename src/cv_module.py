@@ -21,6 +21,12 @@ VEHICLE_CLASS_IDS = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 # recall on small/overlapping vehicles and is still fast enough for single-frame inference.
 MODEL_WEIGHTS = "yolov8s.pt"  # pretrained COCO model, auto-downloaded on first use
 
+# Detection confidence threshold. Chosen from a sweep on 124 hand-labelled live Caltrans frames
+# (cv_eval/results/report.md): at the YOLO default of 0.25 the count was on average 7 vehicles
+# low (MAE 7.4); 0.08 cuts that to MAE 4.6 and bias -2.5 without hurting near-empty frames.
+# Picked among a handful of values on the same frames, so expect a little optimism.
+DEFAULT_CONF = 0.08
+
 _model = None
 
 
@@ -80,7 +86,7 @@ def is_unavailable_frame(frame: np.ndarray) -> bool:
     return float((frame.min(axis=2) >= 235).mean()) >= UNAVAILABLE_WHITE_FRACTION
 
 
-def analyze_frame(frame: np.ndarray, conf: float = 0.25):
+def analyze_frame(frame: np.ndarray, conf: float = DEFAULT_CONF):
     """Run detection on a frame; return vehicle count, density ratio, and per-class breakdown.
     Raises CameraUnavailableError for a camera's "Temporarily Unavailable" placeholder."""
     if is_unavailable_frame(frame):
@@ -132,7 +138,7 @@ def congestion_from_density(density_ratio: float) -> str:
 def main():
     parser = argparse.ArgumentParser(description="Count vehicles / estimate density from a camera frame.")
     parser.add_argument("source", help="Image path, video path, snapshot URL, or webcam index (e.g. 0)")
-    parser.add_argument("--conf", type=float, default=0.25)
+    parser.add_argument("--conf", type=float, default=DEFAULT_CONF)
     parser.add_argument("--save", default=None, help="Path to save the annotated frame")
     args = parser.parse_args()
 

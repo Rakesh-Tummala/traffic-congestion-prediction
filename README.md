@@ -153,7 +153,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (84 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (89 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -586,6 +586,65 @@ See `tests/test_weather.py` and `tests/test_report.py`.
 
 ---
 
+## Computer-vision evaluation
+
+The vision part (YOLOv8 vehicle counting, then density -> congestion label) used to
+have no accuracy figure of its own: the R²=0.977 above belongs to the historical
+model. `cv_eval/` measures it against **162 live Caltrans frames** sampled across all
+12 districts (all daytime, captured 2026-10-13 around 09:00-09:25 PDT). 124 are
+usable; the rest are unavailable-camera placeholders (33), glare/haze (4) and a
+parking lot (1). Each usable
+frame has a hand-labelled vehicle count and congestion class: Low 92, Moderate 22,
+High 8, Severe 2. Full tables are in `cv_eval/results/report.md`; re-run with
+`python cv_eval/evaluate_cv.py`.
+
+**Read the limits first.** The labels were made by looking at the frames, not from a
+sensor: counts are approximate (small distant vehicles are counted, which makes the
+detector look worse), classes are a visual judgement, and there are only 10 High/Severe
+frames, so those per-class numbers are weak evidence. Label files are in
+`cv_eval/labels.csv`; see `cv_eval/README.md`.
+
+**What it found, and what changed**
+
+1. **About 1 in 5 cameras served the "Temporarily Unavailable" placeholder** (33 of 162).
+   A detector sees no vehicles in it and the app reported an empty road ("Low").
+   `analyze_frame` now raises `CameraUnavailableError` for it (the placeholder is 86%
+   near-white pixels; the most washed-out real frame is 22%), and the UI shows the
+   existing "could not read" message instead of a congestion badge.
+2. **The default detector undercounted heavily.** At YOLO's default confidence of
+   0.25, `yolov8s` @ 640px was on average **7.3 vehicles low** (count MAE 7.43, only 39%
+   of frames within max(2, 25%) of the hand count), and far worse in dense traffic
+   (MAE 23.5 on frames with 21+ vehicles). Lowering the confidence threshold to **0.08**
+   gives MAE 4.55, bias -2.5, 59% within tolerance, without hurting near-empty
+   frames (MAE 1.55 -> 1.41 on 0-5 vehicles) and halving the error on dense ones
+   (23.5 -> 12.6 on 21+ vehicles). The app now uses `DEFAULT_CONF = 0.08`.
+3. **Bigger models were not worth it here.** `yolov8m` @ 640px, conf 0.08 reaches MAE 4.15
+   (vs 4.55) but takes 0.56 s per frame on CPU vs 0.24 s, which matters when a route
+   checks 16 cameras. Running at 1280px did not help. The app stays on `yolov8s` @ 640px.
+4. **Refitting the density thresholds did not help.** Cut-offs fitted on labelled
+   data (5-fold cross-validation x10, so out-of-sample) scored worse on macro-F1 than the
+   original unfitted 0.05 / 0.15 / 0.30 once the detector was fixed, and fitting on vehicle
+   count instead of density did no better. The fixed thresholds stay.
+
+| Setting (`yolov8s` @ 640px) | Count MAE | Bias | Label accuracy | Balanced acc. | Macro-F1 |
+|---|---|---|---|---|---|
+| conf 0.25 (before) | 7.43 | -7.28 | 0.73 | 0.32 | 0.33 |
+| conf 0.08 (now) | 4.55 | -2.52 | 0.75 | 0.62 | 0.64 |
+| Always answer "Low" | - | - | 0.74 | 0.25 | - |
+
+Label accuracy alone is misleading: 74% of usable frames are Low, so "always Low" scores
+0.74. Balanced accuracy (mean recall per class) and macro-F1 are the fair measures. The
+detector still undercounts very dense or distant traffic (e.g. a wide 8-lane freeway
+frame with ~45 vehicles was read as 9), so congested roads are more likely to be
+under-labelled than over-labelled.
+
+**Honest caveats.** The confidence value was picked from a handful of options on the same
+frames it is scored on, so the improvement is slightly optimistic. The set is daytime
+only, from one 25-minute window; night, rain and fog are untested. No model was
+fine-tuned: that needs bounding-box labels, not the counts collected here (see Future work).
+
+---
+
 ## Limitations and future work
 
 Stated up front so nothing here is a surprise:
@@ -602,8 +661,13 @@ Stated up front so nothing here is a surprise:
   Single camera tab) rather than to every camera, where it would put a floor
   under all of them.
 - **Density thresholds are heuristics.** `congestion_from_density` uses fixed
-  cut-offs (0.05 / 0.15 / 0.30) that were not fitted to labelled camera data,
-  and one frame is a snapshot, not a flow measurement.
+  cut-offs (0.05 / 0.15 / 0.30). They were checked against 124 hand-labelled
+  frames (see [Computer-vision evaluation](#computer-vision-evaluation)): decent at
+  separating Low from congested, but the labels are approximate and only 10 frames
+  are High/Severe. One frame is a snapshot, not a flow measurement, and the
+  detector still undercounts dense or distant traffic.
+- **No fine-tuning.** The detector is pretrained COCO YOLOv8s used as-is; only
+  its confidence threshold was tuned.
 - **Route colors are estimates.** They come from scattered camera snapshots
   (solid within 2 km, faded 2-8 km, gray beyond), not continuous traffic data
   like a navigation app. Drive time is free-flow. Coverage is California only.
@@ -613,8 +677,10 @@ Stated up front so nothing here is a surprise:
   are best-effort demos (see their sections), and e-Challan is a simulation.
 
 Future work: train the historical model on California sensor data (Caltrans
-PeMS), fit the density thresholds against labelled camera frames, and replace
-the camera-snapshot route coloring with a continuous traffic feed.
+PeMS); fine-tune the detector on Caltrans frames, which needs bounding-box
+labels (the evaluation set only has counts) and a larger set that includes
+night, rain and fog; label more High/Severe frames; and replace the
+camera-snapshot route coloring with a continuous traffic feed.
 
 ---
 
@@ -676,7 +742,7 @@ src/
   data_loader.py      dataset loading + feature engineering (cyclical time, weather, lag features)
   train_regression.py Linear Regression + SVR (+ seasonal_profile for live fallback)
   train_dl.py         LSTM (PyTorch), validation-based early stopping
-  cv_module.py        YOLOv8s vehicle detection/counting
+  cv_module.py        YOLOv8s vehicle detection/counting (+ unavailable-camera check)
   live_cameras.py     browse/fetch real public Caltrans CCTV camera snapshots + stream URLs
   live_predict.py     fuses CV output + trained models -> congestion label; anomaly flag + departure recommendation
   speed_estimation.py multi-frame vehicle tracking + speed estimation from live video
@@ -689,6 +755,7 @@ src/
   report.py           composes an annotated frame + summary panel into a downloadable PNG
   route_map.py        geocoding (Nominatim), road path (OSRM), cameras along a route, nearest-camera coloring, map framing
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
+cv_eval/              labelled Caltrans frames + scripts that measure the CV part (counting error, label accuracy)
 tests/                pytest suite (fusion/anomaly/departure, explainability, prediction history, real weather,
                       report generation, route map, data pipeline, live inference, speed math, e-challan, ANPR, vehicle attrs)
 app.py                Streamlit dashboard
