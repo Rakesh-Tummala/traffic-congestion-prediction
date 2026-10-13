@@ -424,8 +424,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-mode_single, mode_grid, mode_route, mode_live, mode_challan = st.tabs(
-    ["🔍 Single camera", "🗂️ Monitoring grid", "🛣️ Route", "🎥 Live monitor", "🧾 e-Challan"])
+mode_single, mode_grid, mode_route, mode_challan = st.tabs(
+    ["🔍 Single camera", "🗂️ Monitoring grid", "🛣️ Route", "🧾 Live e-Challan"])
+mode_live = mode_challan  # the live monitor and the e-challan section share one tab, live part first
 
 # ---------------------------------------------------------------- single camera
 with mode_single:
@@ -951,7 +952,7 @@ with mode_single:
                                     st.caption("No challans generated yet.")
                         else:
                             st.caption("No tracked vehicle is over the limit, so there is no challan to simulate. "
-                                       "You can also try the 🧾 e-Challan tab with a made-up vehicle.")
+                                       "You can also use the 🧾 Live e-Challan tab, which watches a camera and issues challans automatically.")
 
 # ---------------------------------------------------------------- monitoring grid
 with mode_grid:
@@ -1378,7 +1379,7 @@ def _render_live_monitor():
 
 
 with mode_live:
-    st.subheader("Live monitor: detection, speed and automatic challans")
+    st.subheader("Live e-Challan: watch a camera, detect cars, issue simulated challans")
     st.warning(ECHALLAN_DISCLAIMER)
     with st.expander("How this works, and how far to trust it"):
         st.markdown(
@@ -1416,9 +1417,21 @@ with mode_live:
     else:
         lm_labels = [f"{c['name']} — {c['nearby_place']}" for c in lm_cams]
         if st.session_state.get("live_camera") not in lm_labels:
-            st.session_state["live_camera"] = lm_labels[0]
+            # Default to a camera known to calibrate well (a clear straight view with cars at many
+            # distances) when it is in this list, so the first run shows the whole pipeline working.
+            preferred = [l for l in lm_labels if "(37) Olive" in l]
+            st.session_state["live_camera"] = (preferred or lm_labels)[0]
         lm_pick = st.selectbox(f"Camera ({len(lm_cams)} with video)", lm_labels, key="live_camera")
+        st.caption("Tip: speed tracking works best on a camera that looks straight down a road with cars at "
+                   "many distances (I-5 at Olive, District 7, is a good one). On a camera with a sideways or "
+                   "unusual view it says speeds are not reliable and issues no challans, on purpose.")
         lm_cam = lm_cams[lm_labels.index(lm_pick)]
+
+        if st.checkbox("📹 Show this camera's live video", value=True, key="live_show_video",
+                       help="Plays straight from Caltrans in your browser. Some streams are offline."):
+            components.html(hls_player_html(lm_cam["stream_url"], height=340), height=352)
+            st.caption("This is the camera's real-time video. After you press Start monitoring, the annotated "
+                       "feed below (boxes, speeds, challans) updates about once a second.")
 
         lm_auto = st.checkbox("Set the speed limit automatically from the camera's road (OpenStreetMap)",
                               value=True, key="live_auto_limit")
@@ -1471,14 +1484,12 @@ with mode_live:
 
 # ---------------------------------------------------------------- e-challan
 with mode_challan:
-    st.subheader("e-Challan (simulation)")
-    st.warning(ECHALLAN_DISCLAIMER)
-    st.caption("A challan is the document an over-speeding vehicle would receive. In this project the "
-               "pipeline is: live video burst, vehicle tracking, speed estimate, optional plate reading, "
-               "then a challan showing what the fine would have been. Two ways to generate one:")
-    st.markdown("- **Automatically from live cars:** 🎥 **Live monitor** watches a live camera and generates "
-                "a challan for each vehicle clearly over the limit. Those challans show up in the history below.\n"
-                "- **From a speed-check burst:** 🔍 Single camera, live camera, **Speed check**. If a "
+    st.divider()
+    st.subheader("Other ways to generate a challan, and the history")
+    st.caption("A challan is the document an over-speeding vehicle would receive: live video, vehicle "
+               "tracking, speed estimate, optional plate reading, then a challan showing what the fine "
+               "would have been. Besides the live monitor above:")
+    st.markdown("- **From a speed-check burst:** 🔍 Single camera, live camera, **Speed check**. If a "
                 "vehicle is over the limit, its challan form appears there.\n"
                 "- **From made-up values (below):** a way to demo the challan itself without waiting for a "
                 "real speeder.")

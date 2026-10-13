@@ -586,7 +586,7 @@ See `tests/test_weather.py` and `tests/test_report.py`.
 
 ---
 
-## Live video and the e-Challan tab
+## Live video and the Live e-Challan tab
 
 - **Live video.** For cameras that have a video stream (about two thirds of the Caltrans
   network; many of those streams are offline at any moment), tick **📹 Watch live video**
@@ -594,7 +594,7 @@ See `tests/test_weather.py` and `tests/test_report.py`.
   hls.js (`src/live_video.py`); nothing is proxied or recorded. The congestion reading
   is still computed from the snapshot, not from the video. A dead stream shows a
   message instead of a blank box.
-- **🎥 Live monitor.** Runs detection on the live video itself. A background worker
+- **🧾 Live e-Challan tab, live part.** Pick a district and camera, see its live video, and press Start monitoring. It runs detection on the live video itself. A background worker
   (`src/live_monitor.py`) reads the camera's HLS stream, runs YOLO on about 4 frames per
   second with its own detector instance, tracks vehicles frame to frame
   (`src/vehicle_tracking.py`), and shows the annotated live frame with a vehicle count and
@@ -602,7 +602,7 @@ See `tests/test_weather.py` and `tests/test_report.py`.
   limit, **generates a simulated challan from that real vehicle**: its type, estimated speed,
   time and camera, a cropped picture of it, its plate if one can be read (optional) and its
   color/type (optional). Challans appear in the tab and in the e-Challan history.
-- **🧾 e-Challan tab.** The simulated challan generator was previously only reachable at the
+- **🧾 Live e-Challan tab, the rest.** Below the live part: other ways to generate a challan and the history. The simulated challan generator was previously only reachable at the
   bottom of Single camera, after **Check speeds** found a vehicle over the limit, which
   rarely happens on a live camera. It now has its own tab: challan history (with source:
   live monitor, speed check or manual), CSV download, a "clear history" button, and a form to
