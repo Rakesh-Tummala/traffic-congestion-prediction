@@ -37,8 +37,9 @@ from live_predict import (  # noqa: E402
 from speed_estimation import US_LANE_WIDTH_M, annotate_speeds, check_speeds  # noqa: E402
 from echallan import (  # noqa: E402
     DISCLAIMER as ECHALLAN_DISCLAIMER, FINE_SCHEDULE_INR, append_to_log, generate_challan, load_log,
-    render_challan_html,
+    render_challan_html, clear_log,
 )
+from live_monitor import LiveMonitor  # noqa: E402
 from live_video import hls_player_html, is_playable_url  # noqa: E402
 from anpr import read_plate  # noqa: E402
 from vehicle_attributes import describe_vehicle  # noqa: E402
@@ -373,8 +374,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-mode_single, mode_grid, mode_route, mode_challan = st.tabs(
-    ["🔍 Single camera", "🗂️ Monitoring grid", "🛣️ Route", "🧾 e-Challan"])
+mode_single, mode_grid, mode_route, mode_live, mode_challan = st.tabs(
+    ["🔍 Single camera", "🗂️ Monitoring grid", "🛣️ Route", "🎥 Live monitor", "🧾 e-Challan"])
 
 # ---------------------------------------------------------------- single camera
 with mode_single:
@@ -1250,6 +1251,151 @@ with mode_route:
         _show_route_view()
 
 
+# ---------------------------------------------------------------- live monitor
+def _render_live_monitor():
+    """Polled once a second while a monitor runs: shows the annotated live frame, status and challans."""
+    mon = st.session_state.get("live_monitor")
+    if mon is None:
+        st.info("Pick a camera and press **Start monitoring**. The app will watch the live video, detect and "
+                "track the vehicles, estimate their speeds, and generate a simulated challan for any vehicle "
+                "clearly over the limit.")
+        return
+    snap = mon.snapshot()
+    status = snap["status"]
+    left, right = st.columns([1.7, 1])
+    with left:
+        if snap["frame"] is not None:
+            st.image(cv2.cvtColor(snap["frame"], cv2.COLOR_BGR2RGB), use_container_width=True,
+                     caption=f"{mon.camera_name}: live detection (boxes show estimated speed in mph once "
+                             "calibrated; gray = no speed estimate)")
+        elif status in ("starting", "calibrating"):
+            st.info("Opening the stream and loading the detector... (the first frame can take 10-20 seconds)")
+    with right:
+        st.caption(f"Status: **{status}**  ·  {snap['elapsed']:.0f}s of {mon.run_seconds:.0f}s  ·  "
+                   f"{snap['fps']:.1f} frames/s analyzed")
+        if snap["message"]:
+            (st.error if status == "error" else st.warning)(snap["message"])
+        if snap["congestion"]:
+            congestion_badge(snap["congestion"], key=mon.camera_name)
+            st.markdown(counter_html(snap["vehicle_count"], "Vehicles in view right now"), unsafe_allow_html=True)
+        ss = snap["speed_status"]
+        if ss == "ok":
+            st.success(f"Speed tracking on ({snap['tracks_with_speed']} vehicles tracked, calibration scale "
+                       f"x{snap['scale']:.2f}).")
+            if snap["scale"] > 1.8 or snap["scale"] < 0.55:
+                st.caption("⚠️ A large correction was needed to match the typical traffic speed you set, so "
+                           "these speeds are mostly *relative to the flow of traffic* (who is faster than "
+                           "the rest), not absolute mph.")
+        elif ss == "calibrating":
+            st.info("Calibrating speed tracking: needs about 25 seconds of video and a dozen tracked "
+                    f"vehicles ({snap['tracks_with_speed']} so far).")
+        elif ss == "unreliable":
+            st.warning("Speeds are not reliable on this camera right now, so no challans are issued. Detection "
+                       "and counting still work. Try a camera with a clear view along a straight road.")
+        if snap["calibration"]:
+            st.caption(f"Camera model fitted from the traffic: estimated camera height "
+                       f"{snap['calibration']['camera_height_m']} m, fit quality "
+                       f"{snap['calibration']['correlation']}.")
+
+    events = snap["events"]
+    st.markdown(f"###### Simulated challans from this session ({len(events)})")
+    if not events:
+        st.caption("None yet. A vehicle must stay over the limit plus the margin for several consecutive "
+                   "measurements before a challan is generated.")
+    for ev in reversed(events):
+        ec1, ec2 = st.columns([1, 2])
+        ec1.image(cv2.cvtColor(ev["crop"], cv2.COLOR_BGR2RGB), caption=f"{ev['cls_name']} at {ev['time']}, "
+                  f"~{ev['speed_mph']:.0f} mph", use_container_width=True)
+        if ev["challan"] is not None:
+            ec2.markdown(render_challan_html(ev["challan"]), unsafe_allow_html=True)
+        else:
+            ec2.info("Generating challan (reading plate / identifying the vehicle)..." if ev["status"] == "processing"
+                     else f"Could not generate the challan: {ev['status']}")
+
+    if not mon.running and st.session_state.get("_live_final_rerun") != id(mon):
+        st.session_state["_live_final_rerun"] = id(mon)
+        st.rerun()  # one full rerun so polling stops now that the monitor has finished
+
+
+with mode_live:
+    st.subheader("Live monitor: detection, speed and automatic challans")
+    st.warning(ECHALLAN_DISCLAIMER)
+    with st.expander("How this works, and how far to trust it"):
+        st.markdown(
+            "- The app reads the camera's **live video stream**, runs YOLO on about 4 frames per second, and "
+            "tracks each vehicle from frame to frame.\n"
+            "- **Speed** comes from a flat-road camera model fitted from the cars themselves (no manual "
+            "calibration). The camera's zoom is unknown, so speeds are also scaled so the median vehicle matches "
+            "the *typical traffic speed* you set below. Speeds are only estimated for vehicles in a reliable "
+            "distance band, and if the camera model is not convincing, speeds and challans are switched off.\n"
+            "- **Treat speeds as rough estimates** (easily 20-30% off, and not validated against radar). "
+            "A challan here is a demonstration of the pipeline, never evidence of a real violation.\n"
+            "- A challan is generated automatically from the real vehicle observed: its type, estimated speed, "
+            "time and camera, plus its plate (if readable) and color/type (if enabled). Pictures stay in memory "
+            "only; the on-disk challan log holds text fields only."
+        )
+
+    lm1, lm2 = st.columns([1, 1])
+    with lm1:
+        lm_district = st.selectbox("District", DISTRICTS, index=6, key="live_district",
+                                   format_func=lambda d: f"District {d}")
+    with lm2:
+        lm_filter = st.text_input("Filter by route / location", key="live_filter",
+                                  placeholder="e.g. I-5, 405, Burbank")
+    try:
+        lm_cams = [c for c in _cached_cameras(lm_district) if is_playable_url(c.get("stream_url", ""))]
+    except Exception as e:
+        lm_cams = []
+        st.error(f"Could not reach Caltrans camera feed: {e}")
+    if lm_filter:
+        needle = lm_filter.lower()
+        lm_cams = [c for c in lm_cams if needle in c["name"].lower() or needle in c["nearby_place"].lower()]
+
+    if not lm_cams:
+        st.info("No cameras with a live video stream match that filter.")
+    else:
+        lm_labels = [f"{c['name']} — {c['nearby_place']}" for c in lm_cams]
+        if st.session_state.get("live_camera") not in lm_labels:
+            st.session_state["live_camera"] = lm_labels[0]
+        lm_pick = st.selectbox(f"Camera ({len(lm_cams)} with video)", lm_labels, key="live_camera")
+        lm_cam = lm_cams[lm_labels.index(lm_pick)]
+
+        lc1, lc2, lc3, lc4 = st.columns(4)
+        lm_limit = lc1.number_input("Speed limit (mph)", min_value=5.0, value=65.0, step=5.0, key="live_limit")
+        lm_margin = lc2.number_input("Challan only if over by (mph)", min_value=1.0, value=15.0, step=1.0,
+                                     key="live_margin", help="Absorbs the speed estimate's error.")
+        lm_ref = lc3.number_input("Typical traffic speed here (mph)", min_value=10.0, value=60.0, step=5.0,
+                                  key="live_ref", help="Speeds are scaled so the median tracked vehicle "
+                                  "matches this. Set it to roughly how fast traffic normally moves here.")
+        lm_secs = lc4.slider("Run for (seconds)", 30, 300, 120, step=10, key="live_secs")
+        lo1, lo2 = st.columns(2)
+        lm_plates = lo1.checkbox("Try to read license plates (slow; plates are rarely legible)", key="live_plates")
+        lm_ident = lo2.checkbox("Identify color and type (slow; first run downloads a model)", key="live_ident")
+
+        if lm_limit + lm_margin < lm_ref:
+            st.caption("⚠️ The limit plus margin is below the typical traffic speed you set, so most vehicles "
+                       "will count as violations. Raise the limit or the margin for a realistic run "
+                       "(a session issues at most 12 challans, at least 3 seconds apart).")
+        b1, b2, _ = st.columns([1, 1, 3])
+        if b1.button("▶ Start monitoring", type="primary", key="live_start"):
+            old = st.session_state.get("live_monitor")
+            if old is not None:
+                old.stop()
+            new_mon = LiveMonitor(lm_cam["stream_url"], f"{lm_cam['name']} ({lm_cam['nearby_place']})",
+                                  limit_mph=lm_limit, margin_mph=lm_margin, reference_mph=lm_ref,
+                                  run_seconds=float(lm_secs), read_plates=lm_plates, identify=lm_ident)
+            new_mon.start()
+            st.session_state["live_monitor"] = new_mon
+            st.session_state.pop("_live_final_rerun", None)
+        if b2.button("■ Stop", key="live_stop"):
+            mon_now = st.session_state.get("live_monitor")
+            if mon_now is not None:
+                mon_now.stop()
+
+    _mon_now = st.session_state.get("live_monitor")
+    st.fragment(run_every=1.0 if (_mon_now is not None and _mon_now.running) else None)(_render_live_monitor)()
+
+
 # ---------------------------------------------------------------- e-challan
 with mode_challan:
     st.subheader("e-Challan (simulation)")
@@ -1257,7 +1403,9 @@ with mode_challan:
     st.caption("A challan is the document an over-speeding vehicle would receive. In this project the "
                "pipeline is: live video burst, vehicle tracking, speed estimate, optional plate reading, "
                "then a challan showing what the fine would have been. Two ways to generate one:")
-    st.markdown("- **From a real tracked vehicle:** 🔍 Single camera, live camera, **Speed check**. If a "
+    st.markdown("- **Automatically from live cars:** 🎥 **Live monitor** watches a live camera and generates "
+                "a challan for each vehicle clearly over the limit. Those challans show up in the history below.\n"
+                "- **From a speed-check burst:** 🔍 Single camera, live camera, **Speed check**. If a "
                 "vehicle is over the limit, its challan form appears there.\n"
                 "- **From made-up values (below):** a way to demo the challan itself without waiting for a "
                 "real speeder.")
@@ -1280,7 +1428,7 @@ with mode_challan:
             manual_result = {"speeding": True, "cls_name": manual_class, "speed_mph": manual_speed,
                              "over_mph": manual_speed - manual_limit}
             manual_challan = generate_challan(manual_result, f"{manual_camera} (manual demo)", manual_limit,
-                                              vehicle_number=manual_plate)
+                                              vehicle_number=manual_plate, source="manual")
             append_to_log(manual_challan)
             st.session_state["manual_challan_html"] = render_challan_html(manual_challan)
 
@@ -1290,10 +1438,18 @@ with mode_challan:
     history = load_log()
     st.markdown(f"###### Challan history ({len(history)} generated on this install)")
     if history:
-        history_df = pd.DataFrame(history)[["challan_id", "issued_at", "camera_name", "vehicle_class",
-                                            "vehicle_number", "plate_auto_detected", "speed_mph", "fine_inr"]]
+        history_df = pd.DataFrame(history).reindex(columns=[
+            "challan_id", "issued_at", "source", "camera_name", "vehicle_class", "vehicle_description",
+            "vehicle_number", "plate_auto_detected", "speed_mph", "fine_inr"])
         st.dataframe(history_df, hide_index=True, use_container_width=True)
         st.download_button("⬇️ Download history (CSV)", history_df.to_csv(index=False).encode("utf-8"),
                            file_name="challan_history.csv", mime="text/csv")
+        with st.expander("Clear history"):
+            st.caption("Deletes the local challan log (demo data only) from this computer.")
+            confirmed = st.checkbox("Yes, delete all stored challans", key="confirm_clear_challans")
+            if confirmed and st.button("Delete challan history", key="clear_challans"):
+                st.success(f"Deleted {clear_log()} challans.")
+                st.session_state.pop("manual_challan_html", None)
+                st.rerun()
     else:
         st.caption("No challans generated yet.")

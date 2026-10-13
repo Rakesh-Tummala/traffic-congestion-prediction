@@ -153,7 +153,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (101 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (113 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -594,12 +594,40 @@ See `tests/test_weather.py` and `tests/test_report.py`.
   hls.js (`src/live_video.py`); nothing is proxied or recorded. The congestion reading
   is still computed from the snapshot, not from the video. A dead stream shows a
   message instead of a blank box.
+- **🎥 Live monitor.** Runs detection on the live video itself. A background worker
+  (`src/live_monitor.py`) reads the camera's HLS stream, runs YOLO on about 4 frames per
+  second with its own detector instance, tracks vehicles frame to frame
+  (`src/vehicle_tracking.py`), and shows the annotated live frame with a vehicle count and
+  congestion badge. It also estimates each vehicle's speed and, when one is clearly over the
+  limit, **generates a simulated challan from that real vehicle**: its type, estimated speed,
+  time and camera, a cropped picture of it, its plate if one can be read (optional) and its
+  color/type (optional). Challans appear in the tab and in the e-Challan history.
 - **🧾 e-Challan tab.** The simulated challan generator was previously only reachable at the
   bottom of Single camera, after **Check speeds** found a vehicle over the limit, which
-  rarely happens on a live camera. It now has its own tab: generate a challan from made-up
-  values (vehicle type, limit, recorded speed) to demo the document itself, see the
-  history, and download it as CSV. The real path (tracked vehicle, plate reading, challan)
-  is unchanged. Still a simulation: see the disclaimer in the app and the section above.
+  rarely happens on a live camera. It now has its own tab: challan history (with source:
+  live monitor, speed check or manual), CSV download, a "clear history" button, and a form to
+  generate a challan from made-up values to demo the document itself. Still a simulation:
+  see the disclaimer in the app and the section above.
+
+**How the Live monitor's speed works, and why to be skeptical of it.** These cameras publish
+no calibration, so speed is inferred. (1) A flat-road pinhole-camera model is fitted from the
+cars themselves: for a camera looking along a road, a car's ground row and pixel width are
+linearly related, which gives the horizon and the camera height; the focal length is
+*assumed* from a typical 62 degree field of view. If the fit is not convincing, speeds are
+switched off for that camera. (2) Pixel noise grows with distance, so speeds are only
+reported inside a distance band (8-75 m from the camera). (3) Because the camera's real zoom
+is unknown, speeds are scaled so the median tracked vehicle matches a "typical traffic speed"
+you set; if that needs a correction outside 0.4x-2.5x the camera is marked unreliable and no
+challans are issued. The math itself is unit-tested against synthetic cars of known speed
+(within 4%), but **the estimates are not validated against radar or any ground truth**.
+On the live cameras tried, the raw model often needed a ~2x correction, so treat speeds as
+roughly "faster or slower than the rest of the traffic", not as exact mph. In testing, far
+vehicles read much faster than near ones in the same traffic before the distance band was
+added. Safeguards: a vehicle must stay over the limit plus a margin for 3 consecutive
+measurements, a session issues at most 12 challans, at least 3 seconds apart, and the monitor
+stops when you leave the page. Evidence pictures are held in memory only; the on-disk log has
+text fields only. The challan is a demonstration of the pipeline, never evidence of a real
+violation.
 
 ---
 
@@ -789,6 +817,8 @@ src/
   prediction_log.py   local per-camera prediction history log, powers the trend chart + map coloring
   weather.py          real current weather for a camera's coordinates via Open-Meteo (free, no API key)
   report.py           composes an annotated frame + summary panel into a downloadable PNG
+  live_monitor.py     background worker: detection + tracking + speed + automatic challans on a live stream
+  vehicle_tracking.py tracker, camera calibration from the traffic itself, speed estimation
   live_video.py       embeds a camera's live HLS video stream (hls.js) in the dashboard
   ui_theme.py         the 'traffic control room' look: CSS, animated header, glowing badge, counter, status messages
   route_map.py        geocoding (Nominatim), road path (OSRM), cameras along a route, nearest-camera coloring, map framing

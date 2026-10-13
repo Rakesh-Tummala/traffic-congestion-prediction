@@ -55,6 +55,8 @@ class Challan:
     legal_reference: str
     plate_auto_detected: bool = False
     plate_confidence: float = 0.0
+    vehicle_description: str = ""   # e.g. "white SUV (best guess)"; empty when not identified
+    source: str = "manual"          # "manual" form, "speed check" burst, or "live monitor"
 
 
 def compute_fine(vehicle_class: str, over_mph: float) -> tuple[int, str]:
@@ -67,7 +69,8 @@ def compute_fine(vehicle_class: str, over_mph: float) -> tuple[int, str]:
 
 def generate_challan(speed_result: dict, camera_name: str, speed_limit_mph: float,
                       vehicle_number: str = "", plate_auto_detected: bool = False,
-                      plate_confidence: float = 0.0) -> Challan:
+                      plate_confidence: float = 0.0, vehicle_description: str = "",
+                      source: str = "speed check") -> Challan:
     """Build a Challan from one entry of speed_estimation.check_speeds()'s
     `results` list. Raises ValueError if the vehicle wasn't actually flagged
     as speeding — a challan should never be generated for a non-violation."""
@@ -80,7 +83,8 @@ def generate_challan(speed_result: dict, camera_name: str, speed_limit_mph: floa
         issued_at=datetime.now().isoformat(timespec="seconds"),
         camera_name=camera_name,
         vehicle_class=speed_result["cls_name"],
-        vehicle_number=vehicle_number.strip() or "NOT ENTERED (demo)",
+        vehicle_number=vehicle_number.strip() or ("NOT READ (plate not legible)" if source == "live monitor"
+                                                  else "NOT ENTERED (demo)"),
         speed_mph=round(speed_result["speed_mph"], 1),
         speed_limit_mph=speed_limit_mph,
         over_mph=round(speed_result["over_mph"], 1),
@@ -88,6 +92,8 @@ def generate_challan(speed_result: dict, camera_name: str, speed_limit_mph: floa
         legal_reference=legal_ref,
         plate_auto_detected=plate_auto_detected,
         plate_confidence=round(plate_confidence, 3),
+        vehicle_description=vehicle_description,
+        source=source,
     )
 
 
@@ -95,8 +101,12 @@ def render_challan_html(challan: Challan) -> str:
     c = challan
     if c.plate_auto_detected:
         plate_note = f"auto-detected, confidence {c.plate_confidence:.2f} — unverified"
+    elif c.source == "live monitor":
+        plate_note = "no plate could be read from the video"
     else:
         plate_note = "entered manually"
+    desc_row = (f'<tr><td style="padding:3px 0;opacity:0.7;">Appearance</td><td>{escape(c.vehicle_description)}</td></tr>'
+                if c.vehicle_description else "")
     return f"""
 <div style="border:2px solid #ef4444;border-radius:10px;padding:16px;font-family:sans-serif;
 max-width:480px;background:#1a0f0f;">
@@ -111,7 +121,7 @@ max-width:480px;background:#1a0f0f;">
     <tr><td style="padding:3px 0;opacity:0.7;">Location</td><td>{escape(c.camera_name)}</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Vehicle</td><td>{escape(c.vehicle_class.title())} — {escape(c.vehicle_number)}
     <div style="font-size:11px;opacity:0.6;">({escape(plate_note)})</div></td></tr>
-    <tr><td style="padding:3px 0;opacity:0.7;">Violation</td><td>Over-speeding</td></tr>
+    {desc_row}<tr><td style="padding:3px 0;opacity:0.7;">Violation</td><td>Over-speeding</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Detected speed</td><td>{c.speed_mph:.1f} mph</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Speed limit</td><td>{c.speed_limit_mph:.0f} mph</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Over limit by</td><td>{c.over_mph:.1f} mph</td></tr>
@@ -147,3 +157,11 @@ def append_to_log(challan: Challan) -> None:
 
 def load_log() -> list[dict]:
     return _load_log()
+
+
+def clear_log() -> int:
+    """Delete the on-disk challan history (a local demo log). Returns how many entries were removed."""
+    n = len(load_log())
+    if os.path.exists(LOG_PATH):
+        os.remove(LOG_PATH)
+    return n

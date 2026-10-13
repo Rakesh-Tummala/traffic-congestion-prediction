@@ -92,3 +92,25 @@ def test_load_log_backfills_missing_fields_from_older_log_entries(tmp_path, monk
     log = load_log()
     assert log[0]["plate_auto_detected"] is False
     assert log[0]["plate_confidence"] == 0.0
+
+
+def test_live_monitor_challan_without_a_readable_plate_says_so_instead_of_entered_manually():
+    from echallan import generate_challan, render_challan_html
+    c = generate_challan({"speeding": True, "cls_name": "car", "speed_mph": 80.0, "over_mph": 15.0},
+                         "cam", 65.0, source="live monitor", vehicle_description="white SUV (best guess)")
+    html = render_challan_html(c)
+    assert "NOT READ" in c.vehicle_number and "no plate could be read" in html
+    assert "entered manually" not in html and "white SUV" in html and c.source == "live monitor"
+
+
+def test_clear_log_removes_the_history_file(tmp_path, monkeypatch):
+    import echallan
+    path = tmp_path / "log.json"
+    monkeypatch.setattr(echallan, "LOG_PATH", str(path))
+    c = echallan.generate_challan({"speeding": True, "cls_name": "car", "speed_mph": 80.0, "over_mph": 15.0}, "cam", 65.0)
+    echallan.append_to_log(c)
+    echallan.append_to_log(c)
+    assert path.exists() and len(echallan.load_log()) == 2
+    assert echallan.clear_log() == 2
+    assert not path.exists() and echallan.load_log() == []
+    assert echallan.clear_log() == 0
