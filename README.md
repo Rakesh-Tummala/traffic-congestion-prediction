@@ -586,6 +586,38 @@ See `tests/test_weather.py` and `tests/test_report.py`.
 
 ---
 
+## Limitations and future work
+
+Stated up front so nothing here is a surprise:
+
+- **Training data vs. where it is used.** The historical models (LR / SVR /
+  LSTM) are trained on the UCI Metro Interstate Traffic Volume dataset, which
+  is I-94 in the Minneapolis-St. Paul area. The live cameras are Caltrans
+  (California). The model's output is therefore a time-of-day and weather
+  baseline for a different road, not a California prediction. The R²=0.977
+  figure is accuracy on the held-out Minneapolis data only.
+- **The live signal does the real work.** Per-camera and per-route-segment
+  badges come from YOLOv8 vehicle density. The historical label is one shared
+  value per time and weather, so it is applied once (overall route reading,
+  Single camera tab) rather than to every camera, where it would put a floor
+  under all of them.
+- **Density thresholds are heuristics.** `congestion_from_density` uses fixed
+  cut-offs (0.05 / 0.15 / 0.30) that were not fitted to labelled camera data,
+  and one frame is a snapshot, not a flow measurement.
+- **Route colors are estimates.** They come from scattered camera snapshots
+  (solid within 2 km, faded 2-8 km, gray beyond), not continuous traffic data
+  like a navigation app. Drive time is free-flow. Coverage is California only.
+- **Free public services.** OSRM, Nominatim and Open-Meteo are free and
+  keyless but meant for light use.
+- **Experimental features.** Speed estimation, ANPR and vehicle color/type
+  are best-effort demos (see their sections), and e-Challan is a simulation.
+
+Future work: train the historical model on California sensor data (Caltrans
+PeMS), fit the density thresholds against labelled camera frames, and replace
+the camera-snapshot route coloring with a continuous traffic feed.
+
+---
+
 ## Setup
 
 ```bash
