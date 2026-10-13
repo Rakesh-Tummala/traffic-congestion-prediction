@@ -36,6 +36,7 @@ from prediction_log import load_history, log_prediction  # noqa: E402
 from explain import explain_prediction  # noqa: E402
 from weather import fetch_current_weather  # noqa: E402
 from report import build_report_png  # noqa: E402
+from route_map import MAX_CAMERA_DISTANCE_M, color_route, fetch_route, order_cameras  # noqa: E402
 
 LEVEL_COLORS = {"Low": "#22c55e", "Moderate": "#eab308", "High": "#f97316", "Severe": "#ef4444"}
 LEVEL_COLORS_RGB = {"Low": [34, 197, 94], "Moderate": [234, 179, 8], "High": [249, 115, 22], "Severe": [239, 68, 68]}
@@ -62,6 +63,12 @@ def _cached_forecast(date_str: str, temp_c: float, rain_1h: float, snow_1h: floa
                       clouds_all: float, is_holiday: int, weather_main: str, model: str):
     base = datetime.strptime(date_str, "%Y-%m-%d")
     return forecast_day(base, temp_c, rain_1h, snow_1h, clouds_all, is_holiday, weather_main, model)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_route(start: tuple, end: tuple):
+    # One OSRM call per distinct start/end pair; failures raise and aren't cached.
+    return fetch_route(start, end)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -241,6 +248,71 @@ def camera_picker_map(filtered: list, selected_idx_key: str):
         if st.session_state.get(last_click_marker) != clicked_idx:
             st.session_state[last_click_marker] = clicked_idx
             st.session_state[selected_idx_key] = clicked_idx
+
+
+UNKNOWN_RGBA = [120, 130, 140, 170]
+
+
+def _route_rgba(label, alpha: int) -> list:
+    return LEVEL_COLORS_RGB[label] + [alpha] if label else UNKNOWN_RGBA
+
+
+def _route_map(ordered: list):
+    """Draw the checked route: the real road path between its two end cameras,
+    colored stretch by stretch from the nearest camera's reading, with every
+    camera as a numbered dot. `ordered` is route results in route order. Falls
+    back to straight lines between cameras if the road path can't be fetched.
+    Nothing here is clickable, so per-row colors are safe (see camera_picker_map)."""
+    mapped = [r for r in ordered if r["camera"].get("latitude") and r["camera"].get("longitude")]
+    if len(mapped) < 2:
+        return
+
+    def latlon(r):
+        return float(r["camera"]["latitude"]), float(r["camera"]["longitude"])
+
+    readings = [(*latlon(r), r["final_label"]) for r in mapped if r["final_label"]]
+    route, route_error = None, None
+    try:
+        route = _cached_route(latlon(mapped[0]), latlon(mapped[-1]))
+    except Exception as e:
+        route_error = str(e)
+
+    if route:
+        runs = color_route(route["points"], readings)
+    else:
+        runs = []
+        for a, b in zip(mapped, mapped[1:]):
+            labels = [x["final_label"] for x in (a, b) if x["final_label"]]
+            (lat_a, lon_a), (lat_b, lon_b) = latlon(a), latlon(b)
+            runs.append({"label": max(labels, key=CONGESTION_LEVELS.index) if labels else None,
+                         "path": [[lon_a, lat_a], [lon_b, lat_b]]})
+
+    path_rows = [{"path": run["path"], "color": _route_rgba(run["label"], 235)} for run in runs]
+    camera_rows = [{"lon": latlon(r)[1], "lat": latlon(r)[0], "n": str(i + 1),
+                    "color": _route_rgba(r["final_label"], 255)} for i, r in enumerate(mapped)]
+    all_points = [pt for run in runs for pt in run["path"]] + [[c["lon"], c["lat"]] for c in camera_rows]
+
+    layers = [
+        pdk.Layer("PathLayer", id="route-path", data=path_rows, get_path="path", get_color="color",
+                  width_min_pixels=6, cap_rounded=True, joint_rounded=True),
+        pdk.Layer("ScatterplotLayer", id="route-cameras", data=camera_rows, get_position=["lon", "lat"],
+                  get_fill_color="color", get_line_color=[255, 255, 255, 255], stroked=True,
+                  line_width_min_pixels=2, radius_min_pixels=12, get_radius=60),
+        pdk.Layer("TextLayer", id="route-numbers", data=camera_rows, get_position=["lon", "lat"],
+                  get_text="n", get_size=14, get_color=[10, 10, 10, 255],
+                  get_text_anchor="'middle'", get_alignment_baseline="'center'"),
+    ]
+    view = pdk.data_utils.compute_view(all_points, view_proportion=0.85)
+    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view, map_style=None), height=420)
+
+    if route:
+        st.caption(f"Road path from OpenStreetMap (OSRM): {route['distance_m'] / 1000:.1f} km, about "
+                   f"{route['duration_s'] / 60:.0f} min without traffic.")
+    else:
+        st.caption(f"Couldn't fetch the road path ({route_error}); showing straight lines between cameras instead.")
+    st.caption(f"Each stretch takes the color of the nearest camera within {MAX_CAMERA_DISTANCE_M / 1000:.0f} km "
+               "(gray = no camera close enough). These are estimates from scattered camera snapshots, not "
+               "continuous traffic data like a navigation app has. Numbers match the list below.")
 
 
 st.set_page_config(page_title="Smart Traffic Congestion Prediction", layout="wide", page_icon="🚦")
@@ -948,10 +1020,21 @@ with mode_route:
                 else:
                     st.warning("Couldn't read any segment on this route right now.")
 
+                # Put the cameras in corridor order (the multiselect hands them back in
+                # list order, not in the order you'd drive them); cameras with no
+                # coordinates can't be placed, so they go last.
+                located = [r for r in route_results if r["camera"].get("latitude") and r["camera"].get("longitude")]
+                by_camera = {id(r["camera"]): r for r in located}
+                ordered = [by_camera[id(c)] for c in order_cameras([r["camera"] for r in located])] if located else []
+                ordered += [r for r in route_results if id(r["camera"]) not in by_camera]
+
+                st.markdown("###### Route map")
+                _route_map(ordered)
+
                 st.markdown("###### Segment-by-segment")
-                for r in route_results:
+                for n, r in enumerate(ordered, start=1):
                     seg_cols = st.columns([3, 1, 1])
-                    seg_cols[0].markdown(f"**{r['camera']['name']}** — {r['camera']['nearby_place']}")
+                    seg_cols[0].markdown(f"**{n}. {r['camera']['name']}** — {r['camera']['nearby_place']}")
                     if r["error"]:
                         seg_cols[1].caption(f"⚠️ {r['error']}")
                     else:

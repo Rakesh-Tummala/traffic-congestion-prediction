@@ -108,7 +108,17 @@ route**. The overall route reading is always the worst of its segments (the
 same max-severity idea `fuse_labels` uses for one camera, extended across
 several), so a single jammed stretch is never hidden by an otherwise-clear
 route — plus a segment-by-segment breakdown showing which camera is driving
-that result.
+that result. Below the result is a **route map**: the cameras are put in
+corridor order and numbered, the real road path between the two end cameras
+is fetched from OSRM (OpenStreetMap routing, free, no API key), and each
+stretch of that road is colored from the nearest camera's reading within 2
+km (gray where no camera is that close). These colors are estimates from
+scattered camera snapshots, not continuous traffic data like Google Maps
+has, and the app says so on the map. The listed travel time is free-flow
+(no traffic). If OSRM can't be reached, the map falls back to straight
+lines between cameras. Camera ordering is a nearest-neighbor chain from the
+western end of the farthest pair, which fits cameras along one road, not
+arbitrary scattered picks.
 
 Command-line equivalents (no dashboard) are documented further down under
 [Run computer vision on a single frame](#run-computer-vision-on-a-single-frame)
@@ -129,7 +139,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (66 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (76 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -630,8 +640,9 @@ src/
   prediction_log.py   local per-camera prediction history log, powers the trend chart + map coloring
   weather.py          real current weather for a camera's coordinates via Open-Meteo (free, no API key)
   report.py           composes an annotated frame + summary panel into a downloadable PNG
+  route_map.py        orders cameras along a corridor, fetches the road path (OSRM), colors it from nearest cameras
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
 tests/                pytest suite (fusion/anomaly/departure, explainability, prediction history, real weather,
-                      report generation, data pipeline, live inference, speed math, e-challan, ANPR, vehicle attrs)
+                      report generation, route map, data pipeline, live inference, speed math, e-challan, ANPR, vehicle attrs)
 app.py                Streamlit dashboard
 ```
