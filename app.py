@@ -129,6 +129,10 @@ def forecast_chart(df: pd.DataFrame, current_hour: int, bins: np.ndarray, mae: f
     return (chart + line + now_point).properties(height=280).interactive()
 
 
+def _is_valid_index(value, n: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value < n
+
+
 def _hex_to_rgb(hex_color: str) -> list:
     hex_color = hex_color.lstrip("#")
     return [int(hex_color[i:i + 2], 16) for i in (0, 2, 4)]
@@ -154,7 +158,12 @@ def camera_picker_map(filtered: list, selected_idx_key: str):
     in sync in either direction."""
     if selected_idx_key not in st.session_state:
         st.session_state[selected_idx_key] = 0
-    if st.session_state[selected_idx_key] >= len(filtered):
+    # A selectbox remembers its choice as the option's *label*. When a filter or
+    # district change drops that label from the new options, Streamlit hands the
+    # old label string back instead of an index, so this value can be a str, not
+    # just an out-of-range int (found via live testing: TypeError on a bare
+    # `>= len(filtered)`).
+    if not _is_valid_index(st.session_state[selected_idx_key], len(filtered)):
         st.session_state[selected_idx_key] = 0
     current_idx = st.session_state[selected_idx_key]
 
@@ -295,6 +304,8 @@ with mode_single:
                     labels = [f"{c['name']} — {c['nearby_place']}" for c in filtered]
                     choice = st.selectbox(f"Camera ({len(filtered)} available)", range(len(filtered)),
                                           format_func=lambda i: labels[i], key="camera_idx")
+                    if not isinstance(choice, int):  # stale label after a filter change; see camera_picker_map
+                        st.rerun()
                     cam = filtered[choice]
 
                     fetch_col, weather_col, refresh_col = st.columns([1.3, 1.3, 1])
@@ -684,8 +695,16 @@ with mode_single:
                             st.caption(ECHALLAN_DISCLAIMER)
                             veh_labels = [f"{r['cls_name'].title()} — {r['speed_mph']:.0f} mph "
                                           f"(+{r['over_mph']:.0f} over)" for r in speeding_results]
+                            # Labels include each vehicle's speed, so a fresh Check speeds run
+                            # changes them and can leave a stale label string behind (see
+                            # camera_picker_map).
+                            if "echallan_vehicle" in st.session_state and not _is_valid_index(
+                                    st.session_state["echallan_vehicle"], len(speeding_results)):
+                                st.session_state["echallan_vehicle"] = 0
                             veh_choice = st.selectbox("Vehicle", range(len(speeding_results)),
                                                       format_func=lambda i: veh_labels[i], key="echallan_vehicle")
+                            if not isinstance(veh_choice, int):
+                                st.rerun()
 
                             ec1, ec2 = st.columns([1, 2])
                             with ec1:
@@ -867,8 +886,17 @@ with mode_route:
             st.info("No cameras match that filter.")
         else:
             route_labels = [f"{c['name']} — {c['nearby_place']}" for c in route_cameras]
+            # Same stale-label issue as camera_picker_map: after a district or filter
+            # change, previously chosen cameras that aren't in the new list come back as
+            # label strings, which would crash `route_cameras[i]` below. Drop them.
+            previous = st.session_state.get("route_choice", [])
+            kept = [i for i in previous if _is_valid_index(i, len(route_cameras))]
+            if kept != previous:
+                st.session_state["route_choice"] = kept
             chosen_idx = st.multiselect("Cameras along your route (pick 2 or more)", range(len(route_cameras)),
                                         format_func=lambda i: route_labels[i], key="route_choice")
+            if not all(isinstance(i, int) for i in chosen_idx):
+                st.rerun()
 
             with st.expander("Weather assumptions (applied to every camera on the route)"):
                 rw1, rw2 = st.columns(2)
