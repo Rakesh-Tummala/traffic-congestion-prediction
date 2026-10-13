@@ -26,6 +26,7 @@ from streamlit_folium import st_folium
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from cv_module import analyze_frame, congestion_from_density, load_frame  # noqa: E402
+from ui_theme import badge_html, counter_html, header_html, status_message, theme_css  # noqa: E402
 from data_loader import WEATHER_CODES  # noqa: E402
 from live_cameras import DISTRICTS, fetch_cameras  # noqa: E402
 from live_predict import (  # noqa: E402
@@ -110,16 +111,13 @@ def _cached_predict_all(now_minute: str, temp_c: float, rain_1h: float, snow_1h:
                                lag_1h=lag_1h, lag_3h=lag_3h, lag_24h=lag_24h)
 
 
-def congestion_badge(level: str, small: bool = False):
-    color = LEVEL_COLORS[level]
-    pad, title_size, level_size = ("10px 14px", "11px", "22px") if small else ("18px 24px", "13px", "44px")
+def congestion_badge(level: str, small: bool = False, key: str = ""):
+    """Glowing congestion card with a friendly one-liner (omitted on the small grid cards)."""
+    if not small:
+        st.session_state["_last_level"] = level  # drives the speed of the cars in the page header
     st.markdown(
-        f"""<div style="background:{color}1a;border:2px solid {color};border-radius:14px;
-        padding:{pad};text-align:center;margin-bottom:10px;">
-        <div style="font-size:{title_size};color:{color};font-weight:700;letter-spacing:2px;
-        text-transform:uppercase;">Congestion</div>
-        <div style="font-size:{level_size};color:{color};font-weight:800;line-height:1.2;">{level}</div>
-        </div>""",
+        badge_html(level, LEVEL_COLORS[level], small=small,
+                   message="" if small else status_message(level, key)),
         unsafe_allow_html=True,
     )
 
@@ -361,15 +359,14 @@ def _route_map(ordered: list, route: dict = None, endpoints: tuple = None):
 
 
 st.set_page_config(page_title="Smart Traffic Congestion Prediction", layout="wide", page_icon="🚦")
-st.markdown("""
-<style>
-div[data-testid="stMetricValue"] { font-size: 1.6rem; }
-.block-container { padding-top: 2rem; }
-</style>
-""", unsafe_allow_html=True)
-
-st.title("🚦 Smart Traffic Congestion Prediction")
-st.caption("Computer vision vehicle counting + Linear Regression / SVR / LSTM, fused with real live traffic cameras.")
+st.markdown(theme_css(), unsafe_allow_html=True)
+st.markdown(
+    header_html("Smart Traffic Congestion Prediction",
+                "Computer vision vehicle counting + Linear Regression / SVR / LSTM, fused with real live "
+                "traffic cameras. The cars above slow down when the latest reading is congested.",
+                st.session_state.get("_last_level")),
+    unsafe_allow_html=True,
+)
 
 mode_single, mode_grid, mode_route = st.tabs(["🔍 Single camera", "🗂️ Monitoring grid", "🛣️ Route"])
 
@@ -617,7 +614,7 @@ with mode_single:
                                model_label, cv_label, final_label)
                 st.session_state["_logged_for_frame_id"] = id(frame)
 
-            congestion_badge(final_label)
+            congestion_badge(final_label, key=camera_name_for_log)
             if detect_anomaly(model_label, cv_label):
                 st.warning("⚠️ **Unusual congestion detected** — the live camera reading differs sharply "
                           f"from what history expects for this time ({cv_label} vs. an expected "
@@ -635,7 +632,7 @@ with mode_single:
             )
 
             m1, m2 = st.columns(2)
-            m1.metric("Vehicle count", cv_result["vehicle_count"])
+            m1.markdown(counter_html(cv_result["vehicle_count"], "Vehicle count"), unsafe_allow_html=True)
             m2.metric("Image density ratio", cv_result["density_ratio"])
             st.caption(f"Live camera reading: **{cv_label}**  ·  "
                        f"{MODEL_LABELS[model_choice]} historical reading: **{model_label}**  ·  "

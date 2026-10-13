@@ -153,7 +153,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (89 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (97 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -586,6 +586,25 @@ See `tests/test_weather.py` and `tests/test_report.py`.
 
 ---
 
+## Look and feel
+
+The dashboard uses a dark "traffic control room" theme (`.streamlit/config.toml` for the
+base colors, `src/ui_theme.py` for everything else):
+
+- **Moving-cars header:** a strip of cars drives across the top and slows down as the
+  latest congestion reading gets worse (7 s per crossing when Low, 40 s when Severe).
+- **Glowing congestion badge** with an emoji and a short friendly message per level (for
+  example "Gridlock! Time to rethink the trip."). High and Severe pulse. The message is
+  picked deterministically per camera, so it does not change on every rerun.
+- **Animated vehicle counter** that counts up from 0 when a result appears.
+
+All of it is plain CSS (Streamlit strips scripts from markdown), the real number is also
+present as hidden text for screen readers, and animations switch off under the browser's
+"reduce motion" setting. The header's speed uses the last reading from the previous run, so
+it updates one interaction later.
+
+---
+
 ## Computer-vision evaluation
 
 The vision part (YOLOv8 vehicle counting, then density -> congestion label) used to
@@ -753,6 +772,7 @@ src/
   prediction_log.py   local per-camera prediction history log, powers the trend chart + map coloring
   weather.py          real current weather for a camera's coordinates via Open-Meteo (free, no API key)
   report.py           composes an annotated frame + summary panel into a downloadable PNG
+  ui_theme.py         the 'traffic control room' look: CSS, animated header, glowing badge, counter, status messages
   route_map.py        geocoding (Nominatim), road path (OSRM), cameras along a route, nearest-camera coloring, map framing
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
 cv_eval/              labelled Caltrans frames + scripts that measure the CV part (counting error, label accuracy)
