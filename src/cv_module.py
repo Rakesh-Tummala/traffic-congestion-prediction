@@ -62,8 +62,30 @@ def load_frame(source: str) -> np.ndarray:
     return frame
 
 
+class CameraUnavailableError(ValueError):
+    """The image is Caltrans' "Temporarily Unavailable" placeholder, not a real camera view."""
+
+
+# Measured on 162 live Caltrans frames (cv_eval/): the placeholder is 86% near-white
+# pixels, the most washed-out real frame 22%. 0.6 sits well clear of both.
+UNAVAILABLE_WHITE_FRACTION = 0.6
+
+
+def is_unavailable_frame(frame: np.ndarray) -> bool:
+    """True for the mostly-white "Temporarily Unavailable" image a Caltrans camera serves
+    when its feed is down. About one in five sampled cameras was showing it, and with no
+    vehicles in it a detector would report an empty road ("Low") instead of "no data"."""
+    if frame is None or frame.size == 0:
+        return False
+    return float((frame.min(axis=2) >= 235).mean()) >= UNAVAILABLE_WHITE_FRACTION
+
+
 def analyze_frame(frame: np.ndarray, conf: float = 0.25):
-    """Run detection on a frame; return vehicle count, density ratio, and per-class breakdown."""
+    """Run detection on a frame; return vehicle count, density ratio, and per-class breakdown.
+    Raises CameraUnavailableError for a camera's "Temporarily Unavailable" placeholder."""
+    if is_unavailable_frame(frame):
+        raise CameraUnavailableError("This camera's feed is temporarily unavailable (Caltrans "
+                                     "placeholder image), so there is nothing to detect.")
     model = get_model()
     results = model.predict(frame, conf=conf, classes=list(VEHICLE_CLASS_IDS.keys()), verbose=False)[0]
 

@@ -12,3 +12,7 @@ yolov8s.pt
 src/yolov8n.pt
 src/yolov8s.pt
 .streamlit/
+yolov8*.pt
+cv_eval/sheets/
+cv_eval/sheets_labelled/
+cv_eval/results/detections/

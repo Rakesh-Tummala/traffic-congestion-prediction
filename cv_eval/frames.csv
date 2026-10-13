@@ -1,0 +1,163 @@
+id,district,camera,place,image_url,fetched_at
+f001,1,SR20: Holly St (Willits),Willits,https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20hollystwil/sr20hollystwil.jpg,2026-10-13T21:46:46
+f002,1,US-101: Scotia (Looking South),Scotia,https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101scotialookings/us101scotialookings.jpg,2026-10-13T21:46:48
+f003,1,US-101: Eureka / 4th & V - Looking North,Eureka,https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka4thvlookingn/us101eureka4thvlookingn.jpg,2026-10-13T21:46:50
+f004,1,US-101 : South Of US-199 - Looking North (C014),Crescent City,https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101southofus199lookingnorth/us101southofus199lookingnorth.jpg,2026-10-13T21:46:52
+f005,1,SR-20 : East Of US-101 - Looking East (C006),Ukiah,https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr20eastofus101lookingeast/sr20eastofus101lookingeast.jpg,2026-10-13T21:46:54
+f006,1,SR-53: N of 29 JCT - Looking North,Clear Lake,https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr53nof29jctlookingn/sr53nof29jctlookingn.jpg,2026-10-13T21:46:55
+f007,1,US-101: Eureka / 5th&L - Looking South,Eureka,https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eureka5thllookings/us101eureka5thllookings.jpg,2026-10-13T21:46:57
+f008,1,US-101 : Eureka / Spruce Point - Looking North (C023),Eureka,https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101eurekasprucepointlookingnorth/us101eurekasprucepointlookingnorth.jpg,2026-10-13T21:46:59
+f009,1,US-101: Last Chance Loc #2 (Looking North),Klamath,https://cwwp2.dot.ca.gov/data/d1/cctv/image/us101lastchanceloc2lookingn/us101lastchanceloc2lookingn.jpg,2026-10-13T21:47:01
+f010,1,SR-29: 175 JCT (Lakeport) - South,Lakeport,https://cwwp2.dot.ca.gov/data/d1/cctv/image/sr29175jctlakeports/sr29175jctlakeports.jpg,2026-10-13T21:47:03
+f011,2,Clear Creek,Redding,https://cwwp2.dot.ca.gov/data/d2/cctv/image/clearcreek/clearcreek.jpg,2026-10-13T21:47:09
+f012,2,Sacramento Hill,Lakehead,https://cwwp2.dot.ca.gov/data/d2/cctv/image/sacramentohill/sacramentohill.jpg,2026-10-13T21:47:11
+f013,2,Fredonyer East,Susanville,https://cwwp2.dot.ca.gov/data/d2/cctv/image/fredonyereast/fredonyereast.jpg,2026-10-13T21:47:12
+f014,2,Oregon Mtn,Weaverville,https://cwwp2.dot.ca.gov/data/d2/cctv/image/oregonmtn/oregonmtn.jpg,2026-10-13T21:47:13
+f015,2,I5-SR44 Bluffs,Redding,https://cwwp2.dot.ca.gov/data/d2/cctv/image/i5sr44bluffs/i5sr44bluffs.jpg,2026-10-13T21:47:15
+f016,2,Mott Rd,Mount Shasta,https://cwwp2.dot.ca.gov/data/d2/cctv/image/mottrd/mottrd.jpg,2026-10-13T21:47:16
+f017,2,Snowman,McCloud,https://cwwp2.dot.ca.gov/data/d2/cctv/image/snowman/snowman.jpg,2026-10-13T21:47:18
+f018,2,Montgomery Creek,Montgomery Creek,https://cwwp2.dot.ca.gov/data/d2/cctv/image/montgomerycreek/montgomerycreek.jpg,2026-10-13T21:47:20
+f019,2,Gibson,Castella,https://cwwp2.dot.ca.gov/data/d2/cctv/image/gibson/gibson.jpg,2026-10-13T21:47:21
+f020,2,Abrams Lake NB,Mount Shasta,https://cwwp2.dot.ca.gov/data/d2/cctv/image/abramslakenb/abramslakenb.jpg,2026-10-13T21:47:23
+f021,3,Hwy 80 at 51/80 Split,North Highlands,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80at5180split/hwy80at5180split.jpg,2026-10-13T21:47:32
+f022,3,Hwy 50 at Bedford,Placerville,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atbedford/hwy50atbedford.jpg,2026-10-13T21:47:34
+f023,3,Hwy 5 at Vallejo,Sacramento,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5atvallejo/hwy5atvallejo.jpg,2026-10-13T21:47:35
+f024,3,Hwy 80 at Watt,North Highlands,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy80atwatt/hwy80atwatt.jpg,2026-10-13T21:47:36
+f025,3,Hwy 50 at Manlove POC 3,Sacramento,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atmanlovepoc3/hwy50atmanlovepoc3.jpg,2026-10-13T21:47:38
+f026,3,Hwy 5 at Laguna SB,Sacramento,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy5atlagunasb/hwy5atlagunasb.jpg,2026-10-13T21:47:39
+f027,3,Hwy 50 at Ski Run,South Lake Tahoe,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atskirun/hwy50atskirun.jpg,2026-10-13T21:47:41
+f028,3,Hwy 49 at Edgewood,Auburn,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy49atedgewood/hwy49atedgewood.jpg,2026-10-13T21:47:42
+f029,3,Hwy 50 at Riverton Sandhouse,Pollock Pines,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy50atrivertonsandhouse/hwy50atrivertonsandhouse.jpg,2026-10-13T21:47:44
+f030,3,Hwy 65 at Hwy 80,Roseville,https://cwwp2.dot.ca.gov/data/d3/cctv/image/hwy65athwy80/hwy65athwy80.jpg,2026-10-13T21:47:45
+f031,4,TVB64 -- US-101 : East Luchessa Avenue,Gilroy,https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvb64us101eastluchessaavenue/tvb64us101eastluchessaavenue.jpg,2026-10-13T21:47:54
+f032,4,TV301 -- US-101 : At Octavia St,San Francisco,https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv301us101atoctaviast/tv301us101atoctaviast.jpg,2026-10-13T21:47:56
+f033,4,T263N -- SR-123 : AT STANFORD AV Looking North,Emeryville,https://cwwp2.dot.ca.gov/data/d4/cctv/image/t263nsr123atstanfordavlookingnorth/t263nsr123atstanfordavlookingnorth.jpg,2026-10-13T21:47:57
+f034,4,TVH33 -- I-80 : Central Avenue Onramp,Richmond,https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvh33i80centralavenueonramp/tvh33i80centralavenueonramp.jpg,2026-10-13T21:47:59
+f035,4,T259E -- SR-123 : Potrero Avenue - Looking East,El Cerrito,https://cwwp2.dot.ca.gov/data/d4/cctv/image/t259esr123potreroavenuelookingeast/t259esr123potreroavenuelookingeast.jpg,2026-10-13T21:48:00
+f036,4,TV452 -- SR-92 : AT JWO DE ANZA BL,San Mateo,https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv452sr92atjwodeanzabl/tv452sr92atjwodeanzabl.jpg,2026-10-13T21:48:02
+f037,4,TVA94 -- I-580 : AT JWO FOOTHILL BLVD,Oakland,https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva94i580atjwofoothillblvd/tva94i580atjwofoothillblvd.jpg,2026-10-13T21:48:03
+f038,4,TVE11 -- SR-92 : AT CLAWITER RD,Hayward,https://cwwp2.dot.ca.gov/data/d4/cctv/image/tve11sr92atclawiterrd/tve11sr92atclawiterrd.jpg,2026-10-13T21:48:05
+f039,4,TVR43 -- I-580 : Lower Deck Pier 66,Richmond,https://cwwp2.dot.ca.gov/data/d4/cctv/image/tvr43i580lowerdeckpier66/tvr43i580lowerdeckpier66.jpg,2026-10-13T21:48:06
+f040,4,TVA77 -- I-880 : AT WASHINGTON AV LOOP OR,San Leandro,https://cwwp2.dot.ca.gov/data/d4/cctv/image/tva77i880atwashingtonavloopor/tva77i880atwashingtonavloopor.jpg,2026-10-13T21:48:08
+f041,5,SR-1 :  Soquel Ave,Santa Cruz,https://cwwp2.dot.ca.gov/data/d5/cctv/image/sr1soquelave/sr1soquelave.jpg,2026-10-13T21:48:13
+f042,5,US-101 : South of Niblick Road,Paso Robles,https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101southofniblickroad/us101southofniblickroad.jpg,2026-10-13T21:48:14
+f043,5,SR-156 : Mitchell Rd,Hollister,https://cwwp2.dot.ca.gov/data/d5/cctv/image/sr156mitchellrd/sr156mitchellrd.jpg,2026-10-13T21:48:16
+f044,5,US-101 : Del Rio Road,Atascadero,https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101delrioroad/us101delrioroad.jpg,2026-10-13T21:48:17
+f045,5,US-101 : South of John Street,Salinas,https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101southofjohnstreet/us101southofjohnstreet.jpg,2026-10-13T21:48:19
+f046,5,US-101 : Airport Blvd,Salinas,https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101airportblvd/us101airportblvd.jpg,2026-10-13T21:48:20
+f047,5,US-101: West Tefft St,Nipomo,https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101westtefftst/us101westtefftst.jpg,2026-10-13T21:48:21
+f048,5,US-101: El Sueno Rd,Santa Barbara,https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101elsuenord/us101elsuenord.jpg,2026-10-13T21:48:23
+f049,5,US 101 : SR-246,Buellton,https://cwwp2.dot.ca.gov/data/d5/cctv/image/us101sr246/us101sr246.jpg,2026-10-13T21:48:24
+f050,5,SR-1 : SR-68 West,Carmel,https://cwwp2.dot.ca.gov/data/d5/cctv/image/sr1sr68west/sr1sr68west.jpg,2026-10-13T21:48:25
+f051,6,FRE-41-AT MCKINLEY AVE,Fresno,https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atmckinleyave/fre41atmckinleyave.jpg,2026-10-13T21:48:33
+f052,6,FRE-41-AT SHIELDS AVE,Fresno,https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atshieldsave/fre41atshieldsave.jpg,2026-10-13T21:48:35
+f053,6,FRE-168-AT FLORADORA AVE,Fresno,https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre168atfloradoraave/fre168atfloradoraave.jpg,2026-10-13T21:48:36
+f054,6,FRE-41-AT RTE 99 IC,Fresno,https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atrte99ic/fre41atrte99ic.jpg,2026-10-13T21:48:38
+f055,6,FRE-5-AT RTE 33/145 SEP,Coalinga,https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre5atrte33145sep/fre5atrte33145sep.jpg,2026-10-13T21:48:39
+f056,6,FRE-41-AT FRIANT RD,Fresno,https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre41atfriantrd/fre41atfriantrd.jpg,2026-10-13T21:48:40
+f057,6,KER-5-N/O RTE 58,Buttonwillow,https://cwwp2.dot.ca.gov/data/d6/cctv/image/ker5norte58/ker5norte58.jpg,2026-10-13T21:48:42
+f058,6,FRE-198-AT RTE 5,Coalinga,https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre198atrte5/fre198atrte5.jpg,2026-10-13T21:48:43
+f059,6,FRE-180-AT FOWLER AVE,Fresno,https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atfowlerave/fre180atfowlerave.jpg,2026-10-13T21:48:44
+f060,6,FRE-180-AT ACADEMY AVE,Sanger,https://cwwp2.dot.ca.gov/data/d6/cctv/image/fre180atacademyave/fre180atacademyave.jpg,2026-10-13T21:48:46
+f061,7,SR-134 : (660) East of Pacific Ave,Glendale,https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr134660eastofpacificave/sr134660eastofpacificave.jpg,2026-10-13T21:49:00
+f062,7,I-110 : (835) S/O Route 101,Downtown LA,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110835soroute101/i110835soroute101.jpg,2026-10-13T21:49:01
+f063,7,US-101 : (611) Pilgrimage Bridge,Los Angeles,https://cwwp2.dot.ca.gov/data/d7/cctv/image/us101611pilgrimagebridge/us101611pilgrimagebridge.jpg,2026-10-13T21:49:03
+f064,7,SR-107 : (228) 182nd St,Torrance,https://cwwp2.dot.ca.gov/data/d7/cctv/image/sr107228182ndst/sr107228182ndst.jpg,2026-10-13T21:49:05
+f065,7,US-101 : (618) Moorpark St,North Hollywood,https://cwwp2.dot.ca.gov/data/d7/cctv/image/us101618moorparkst/us101618moorparkst.jpg,2026-10-13T21:49:06
+f066,7,I-405 : (354) South of Lennox Blvd,Inglewood,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i405354southoflennoxblvd/i405354southoflennoxblvd.jpg,2026-10-13T21:49:08
+f067,7,I-605 : (438) Valley Blvd,La Puente,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i605438valleyblvd/i605438valleyblvd.jpg,2026-10-13T21:49:09
+f068,7,I-110 : (168) 117th St,Harbor Gateway North,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i110168117thst/i110168117thst.jpg,2026-10-13T21:49:10
+f069,7,I-210 : (450) Allen Ave On-Ramp,Pasadena,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i210450allenaveonramp/i210450allenaveonramp.jpg,2026-10-13T21:49:12
+f070,7,US-101 : (595) North of I-110,Los Angeles,https://cwwp2.dot.ca.gov/data/d7/cctv/image/us101595northofi110/us101595northofi110.jpg,2026-10-13T21:49:13
+f071,8,I-15 : (594) Ranchero Road Loop (s/o Route 395,Hesperia,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i15594rancheroroadloopsoroute395/i15594rancheroroadloopsoroute395.jpg,2026-10-13T21:49:21
+f072,8,I-210 : (118) 0.5 Miles West of Milliken,Rancho Cucamonga,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i21011805mileswestofmilliken/i21011805mileswestofmilliken.jpg,2026-10-13T21:49:23
+f073,8,SR-60 : (359) West of Valley Way,Riverside,https://cwwp2.dot.ca.gov/data/d8/cctv/image/sr60359westofvalleyway/sr60359westofvalleyway.jpg,2026-10-13T21:49:24
+f074,8,I-210 : (112) 0.9 Miles East of Mountain,Upland,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i21011209mileseastofmountain/i21011209mileseastofmountain.jpg,2026-10-13T21:49:25
+f075,8,I-15 : (399) Park and Ride East,Eastvale,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i15399parkandrideeast/i15399parkandrideeast.jpg,2026-10-13T21:49:27
+f076,8,I-210 : (182) At H Street,San Bernardino,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210182athstreet/i210182athstreet.jpg,2026-10-13T21:49:29
+f077,8,I-10 : (29) East Side Mt Vernon,Colton,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1029eastsidemtvernon/i1029eastsidemtvernon.jpg,2026-10-13T21:49:31
+f078,8,I-10 : (26) West of Rancho,Colton,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1026westofrancho/i1026westofrancho.jpg,2026-10-13T21:49:33
+f079,8,I-15 : (94) North Of Summit,Fontana,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1594northofsummit/i1594northofsummit.jpg,2026-10-13T21:49:35
+f080,8,I-15 : (300) 1.0 mi S/O Temecula River,Temecula,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1530010misotemeculariver/i1530010misotemeculariver.jpg,2026-10-13T21:49:37
+f081,9,US-395 : Crestview,Mammoth Lakes,https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395crestview/us395crestview.jpg,2026-10-13T21:49:41
+f082,9,US-395 : North of SR-14 2,Inyokern,https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395northofsr142/us395northofsr142.jpg,2026-10-13T21:49:42
+f083,9,US-395 : Bridgeport,Bridgeport,https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395bridgeport/us395bridgeport.jpg,2026-10-13T21:49:44
+f084,9,SR-58 : Cache Creek,Mojave,https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr58cachecreek/sr58cachecreek.jpg,2026-10-13T21:49:46
+f085,9,SR-58 : Broome Road,Keene,https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr58broomeroad/sr58broomeroad.jpg,2026-10-13T21:49:48
+f086,9,SR-14 : SR-178 Inyokern,Inyokern,https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr14sr178inyokern/sr14sr178inyokern.jpg,2026-10-13T21:49:49
+f087,9,US-395 : North of SR-14 4,Inyokern,https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395northofsr144/us395northofsr144.jpg,2026-10-13T21:49:51
+f088,9,US-395 : McGee Creek Road,Mammoth Lakes,https://cwwp2.dot.ca.gov/data/d9/cctv/image/us395mcgeecreekroad/us395mcgeecreekroad.jpg,2026-10-13T21:49:53
+f089,9,SR-58 : Tehachapi Summit,Tehachapi,https://cwwp2.dot.ca.gov/data/d9/cctv/image/sr58tehachapisummit/sr58tehachapisummit.jpg,2026-10-13T21:49:54
+f090,9,US-6 : State Line,Benton,https://cwwp2.dot.ca.gov/data/d9/cctv/image/us6stateline/us6stateline.jpg,2026-10-13T21:49:56
+f091,10,102 - NB SR 99 Briggsmore Ave,Modesto,https://cwwp2.dot.ca.gov/data/d10/cctv/image/102nbsr99briggsmoreave/102nbsr99briggsmoreave.jpg,2026-10-13T21:50:00
+f092,10,115 - WB 580 Bird Rd,Tracy,https://cwwp2.dot.ca.gov/data/d10/cctv/image/115wb580birdrd/115wb580birdrd.jpg,2026-10-13T21:50:02
+f093,10,167 - WB 4 E/O Jack Tone Rd,Stockton,https://cwwp2.dot.ca.gov/data/d10/cctv/image/167wb4eojacktonerd/167wb4eojacktonerd.jpg,2026-10-13T21:50:03
+f094,10,42 - SB SR-99 Griffith Rd RWIS,Turlock,https://cwwp2.dot.ca.gov/data/d10/cctv/image/42sbsr99griffithrdrwis/42sbsr99griffithrdrwis.jpg,2026-10-13T21:50:05
+f095,10,58 - WB SR 12 E/O I-5,Lodi,https://cwwp2.dot.ca.gov/data/d10/cctv/image/58wbsr12eoi5/58wbsr12eoi5.jpg,2026-10-13T21:50:06
+f096,10,121 - NB 99 S/O SR 4,Stockton,https://cwwp2.dot.ca.gov/data/d10/cctv/image/121nb99sosr4/121nb99sosr4.jpg,2026-10-13T21:50:08
+f097,10,49 - EB SR-12 Jct SR-160 RWIS,Isleton,https://cwwp2.dot.ca.gov/data/d10/cctv/image/49ebsr12jctsr160rwis/49ebsr12jctsr160rwis.jpg,2026-10-13T21:50:10
+f098,10,16 - NB SR-99 S/O French Camp Road,Manteca,https://cwwp2.dot.ca.gov/data/d10/cctv/image/16nbsr99sofrenchcamproad/16nbsr99sofrenchcamproad.jpg,2026-10-13T21:50:12
+f099,10,175 - SR-132: Chrisman,Tracy,https://cwwp2.dot.ca.gov/data/d10/cctv/image/175sr132chrisman/175sr132chrisman.jpg,2026-10-13T21:50:13
+f100,10,26 - EB SR 120 Main Street Manteca,Manteca,https://cwwp2.dot.ca.gov/data/d10/cctv/image/26ebsr120mainstreetmanteca/26ebsr120mainstreetmanteca.jpg,2026-10-13T21:50:15
+f101,11,(C 166) I-5 : SeaWorld Drive 2,San Diego,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c166i5seaworlddrive2/c166i5seaworlddrive2.jpg,2026-10-13T21:50:26
+f102,11,(C067) I-805 : I-15,San Diego,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c067i805i15/c067i805i15.jpg,2026-10-13T21:50:27
+f103,11,(C210) I-8 : Waring Road B,San Diego,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c210i8waringroadb/c210i8waringroadb.jpg,2026-10-13T21:50:29
+f104,11,(C017) SR-163 : Just North Of I-5,San Diego,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c017sr163justnorthofi5/c017sr163justnorthofi5.jpg,2026-10-13T21:50:30
+f105,11,(C058) I-805 : Just North Of I-8,San Diego,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c058i805justnorthofi8/c058i805justnorthofi8.jpg,2026-10-13T21:50:32
+f106,11,(C133) SR-56 : Carmel Creek Road,San Diego,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c133sr56carmelcreekroad/c133sr56carmelcreekroad.jpg,2026-10-13T21:50:34
+f107,11,(C246) I-905 : West of Britannia Road,San Diego,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c246i905westofbritanniaroad/c246i905westofbritanniaroad.jpg,2026-10-13T21:50:35
+f108,11,(C528) I-125: NB JNO Tyler St - T,Spring Valley,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c528i125nbjnotylerstt/c528i125nbjnotylerstt.jpg,2026-10-13T21:50:36
+f109,11,(C264) I-5 : Just South of La Costa Ave B,Encinitas,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c264i5justsouthoflacostaaveb/c264i5justsouthoflacostaaveb.jpg,2026-10-13T21:50:38
+f110,11,(C383) SB 15 : El Norte Pkwy_T,Escondido,https://cwwp2.dot.ca.gov/data/d11/cctv/image/c383sb15elnortepkwyt/c383sb15elnortepkwyt.jpg,2026-10-13T21:50:39
+f111,12,I-5 : (531) Katella & Manchester,Anaheim,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5531katellamanchester/i5531katellamanchester.jpg,2026-10-13T21:50:51
+f112,12,SR-55 : (22) Warner,Santa Ana,https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr5522warner/sr5522warner.jpg,2026-10-13T21:50:52
+f113,12,I-5 : (400) Crown  Valley,Mission Viejo,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5400crownvalley/i5400crownvalley.jpg,2026-10-13T21:50:54
+f114,12,SR-91 : (138) La Palma,Anaheim,https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr91138lapalma/sr91138lapalma.jpg,2026-10-13T21:50:56
+f115,12,SR-73 : (344) South of Newport Coast Drive A,Newport Coast,https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr73344southofnewportcoastdrivea/sr73344southofnewportcoastdrivea.jpg,2026-10-13T21:50:57
+f116,12,SR-73 : (323) North of Paseo De Colinas Undercross,Laguna Niguel,https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr73323northofpaseodecolinasundercross/sr73323northofpaseodecolinasundercross.jpg,2026-10-13T21:50:59
+f117,12,I-5 : (706) La Veta,Santa Ana,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5706laveta/i5706laveta.jpg,2026-10-13T21:51:01
+f118,12,SR-55 : (238) Wilson Street,Costa Mesa,https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr55238wilsonstreet/sr55238wilsonstreet.jpg,2026-10-13T21:51:03
+f119,12,I-5 : (117) Gilbert Street,Anaheim,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5117gilbertstreet/i5117gilbertstreet.jpg,2026-10-13T21:51:04
+f120,12,SR-57 : (184) South of Tonner Canyon Road,Brea,https://cwwp2.dot.ca.gov/data/d12/cctv/image/sr57184southoftonnercanyonroad/sr57184southoftonnercanyonroad.jpg,2026-10-13T21:51:06
+f121,7,I-710 : (267) North of I-405,xxx,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i710267northofi405/i710267northofi405.jpg,2026-10-13T21:52:27
+f122,7,I-710 : (265) North of  I-710 / I-405,Long Beach,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i710265northofi710i405/i710265northofi710i405.jpg,2026-10-13T21:52:29
+f123,7,I-605 : (521) Rose Hills Rd,Whittier,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i605521rosehillsrd/i605521rosehillsrd.jpg,2026-10-13T21:52:30
+f124,7,I-405 : (675) Ventura Blvd,Sherman Oaks,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i405675venturablvd/i405675venturablvd.jpg,2026-10-13T21:52:31
+f125,7,I-605 : (440) Lower Azusa Rd,Baldwin Park,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i605440lowerazusard/i605440lowerazusard.jpg,2026-10-13T21:52:33
+f126,7,I-10 : (125) Griffith/San Pedro,Los Angeles,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i10125griffithsanpedro/i10125griffithsanpedro.jpg,2026-10-13T21:52:34
+f127,7,I-110 : (185) 7th St,South Park,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i1101857thst/i1101857thst.jpg,2026-10-13T21:52:36
+f128,7,I-5 : (568) North of Coyote Creek Brge,Santa Fe Springs,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i5568northofcoyotecreekbrge/i5568northofcoyotecreekbrge.jpg,2026-10-13T21:52:37
+f129,7,I-5 : (44) Roscoe Blvd Ramp,Burbank,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i544roscoeblvdramp/i544roscoeblvdramp.jpg,2026-10-13T21:52:39
+f130,7,US-101 : (602) South of Melrose Ave,Los Angeles,https://cwwp2.dot.ca.gov/data/d7/cctv/image/us101602southofmelroseave/us101602southofmelroseave.jpg,2026-10-13T21:52:40
+f131,7,I-5 : (63) Conn To NB Rte 14,Burbank,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i563conntonbrte14/i563conntonbrte14.jpg,2026-10-13T21:52:41
+f132,7,I-10: (110) Manning St,Palms,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i10110manningst/i10110manningst.jpg,2026-10-13T21:52:43
+f133,7,US-101 : (614) Barham Blvd,Los Angeles,https://cwwp2.dot.ca.gov/data/d7/cctv/image/us101614barhamblvd/us101614barhamblvd.jpg,2026-10-13T21:52:44
+f134,7,I-210 : (453) Sierra Madre,Pasadena,https://cwwp2.dot.ca.gov/data/d7/cctv/image/i210453sierramadre/i210453sierramadre.jpg,2026-10-13T21:52:46
+f135,8,I-10 : (07) East of Euclid,Ontario,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1007eastofeuclid/i1007eastofeuclid.jpg,2026-10-13T21:53:00
+f136,8,I-15 : (86) Arrow Route,Rancho Cucamonga,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1586arrowroute/i1586arrowroute.jpg,2026-10-13T21:53:02
+f137,8,I-15 : (307) 0.75 mi N/O Winchester Road,Temecula,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i15307075minowinchesterroad/i15307075minowinchesterroad.jpg,2026-10-13T21:53:04
+f138,8,I-210 : (291) JCT 330,Highland,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210291jct330/i210291jct330.jpg,2026-10-13T21:53:05
+f139,8,I-15 : (620) n/o Old Hwy 58,Barstow,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i15620nooldhwy58/i15620nooldhwy58.jpg,2026-10-13T21:53:07
+f140,8,I-15 : (617) N/O L St,Barstow,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i15617nolst/i15617nolst.jpg,2026-10-13T21:53:09
+f141,8,I-15 : (311) North of California Oaks Road,Murrieta,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i15311northofcaliforniaoaksroad/i15311northofcaliforniaoaksroad.jpg,2026-10-13T21:53:11
+f142,8,I-10 : (533) West of Cottonwood Springs Road,Mecca,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10533westofcottonwoodspringsroad/i10533westofcottonwoodspringsroad.jpg,2026-10-13T21:53:13
+f143,8,I-210 : (295) East of San Bernardino Avenue,Redlands,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i210295eastofsanbernardinoavenue/i210295eastofsanbernardinoavenue.jpg,2026-10-13T21:53:14
+f144,8,I-215 : (231) SB Murrieta Hot Spring Road,Murrieta,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i215231sbmurrietahotspringroad/i215231sbmurrietahotspringroad.jpg,2026-10-13T21:53:16
+f145,8,I-10 : (509) Main Street,Cabazon,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i10509mainstreet/i10509mainstreet.jpg,2026-10-13T21:53:17
+f146,8,I-215 : (272) Eucalyptus Avenue,Riverside,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i215272eucalyptusavenue/i215272eucalyptusavenue.jpg,2026-10-13T21:53:19
+f147,8,I-15 : (222) 1.25mi Kenwood,San Bernardino,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i15222125mikenwood/i15222125mikenwood.jpg,2026-10-13T21:53:21
+f148,8,I-15 : (40) SR-91 Connector NE Quad,Corona,https://cwwp2.dot.ca.gov/data/d8/cctv/image/i1540sr91connectornequad/i1540sr91connectornequad.jpg,2026-10-13T21:53:23
+f149,12,I-5 : (701) Ball,Anaheim,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5701ball/i5701ball.jpg,2026-10-13T21:53:42
+f150,12,I-5 : (216) Las Ramblas,San Juan Capistrano,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5216lasramblas/i5216lasramblas.jpg,2026-10-13T21:53:44
+f151,12,I-405 : (165) Harbor,Costa Mesa,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405165harbor/i405165harbor.jpg,2026-10-13T21:53:45
+f152,12,I-5 : (90) Oso Parkway Overcross,Mission Viejo,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i590osoparkwayovercross/i590osoparkwayovercross.jpg,2026-10-13T21:53:47
+f153,12,I-5 : (110) Orangewood Avenue,Orange,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5110orangewoodavenue/i5110orangewoodavenue.jpg,2026-10-13T21:53:48
+f154,12,I-5 : (97) North of El Toro (Carlota),Lake Forest,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i597northofeltorocarlota/i597northofeltorocarlota.jpg,2026-10-13T21:53:50
+f155,12,I-5 : (208) El Camino Real,San Clemente,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5208elcaminoreal/i5208elcaminoreal.jpg,2026-10-13T21:53:52
+f156,12,I-405 : (141) Bristol,Costa Mesa,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i405141bristol/i405141bristol.jpg,2026-10-13T21:53:53
+f157,12,I-5 : (234) South of Ortega Highway (San Juan Creek),San Juan Capistrano,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5234southofortegahighwaysanjuancreek/i5234southofortegahighwaysanjuancreek.jpg,2026-10-13T21:53:55
+f158,12,I-5 : (60) North of Vista Hermosa,San Clemente,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i560northofvistahermosa/i560northofvistahermosa.jpg,2026-10-13T21:53:57
+f159,12,I-5 : (233) Valle Road On (San Juan Creek),San Juan Capistrano,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5233valleroadonsanjuancreek/i5233valleroadonsanjuancreek.jpg,2026-10-13T21:53:59
+f160,12,I-5 : (914) NB I-5 at J.Serra,San Juan Capistrano,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5914nbi5atjserra/i5914nbi5atjserra.jpg,2026-10-13T21:54:00
+f161,12,I-5 : (900) Christianitos,San Clemente,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5900christianitos/i5900christianitos.jpg,2026-10-13T21:54:01
+f162,12,I-5 : (218) Avenida Aeropuerto,San Juan Capistrano,https://cwwp2.dot.ca.gov/data/d12/cctv/image/i5218avenidaaeropuerto/i5218avenidaaeropuerto.jpg,2026-10-13T21:54:03
