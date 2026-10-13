@@ -101,24 +101,33 @@ cameras to check (1-16), optional shared weather assumptions, and hit
 thumbnail, and congestion badge, plus a summary count of how many are
 Low/Moderate/High/Severe.
 
-And a **🛣️ Route** tab for checking several specific cameras together as one
-route/corridor: pick a district, select 2+ cameras (any order — this is a
-set, not a strict path), set shared weather assumptions, and hit **Check
-route**. The overall route reading is always the worst of its segments (the
-same max-severity idea `fuse_labels` uses for one camera, extended across
-several), so a single jammed stretch is never hidden by an otherwise-clear
-route — plus a segment-by-segment breakdown showing which camera is driving
-that result. Below the result is a **route map**: the cameras are put in
-corridor order and numbered, the real road path between the two end cameras
-is fetched from OSRM (OpenStreetMap routing, free, no API key), and each
-stretch of that road is colored from the nearest camera's reading within 2
-km (gray where no camera is that close). These colors are estimates from
-scattered camera snapshots, not continuous traffic data like Google Maps
-has, and the app says so on the map. The listed travel time is free-flow
-(no traffic). If OSRM can't be reached, the map falls back to straight
-lines between cameras. Camera ordering is a nearest-neighbor chain from the
-western end of the farthest pair, which fits cameras along one road, not
-arbitrary scattered picks.
+And a **🛣️ Route** tab with three ways to build a route, all ending in the
+same result: an overall reading, a route map, and a segment-by-segment list.
+
+- **Pick cameras** — choose a district, select 2+ cameras (any order — this
+  is a set, not a strict path).
+- **Search places** — type a start and a destination; places are looked up
+  with Nominatim (OpenStreetMap geocoding, free, no key, one request per
+  second per its usage policy). The app finds the driving route and checks
+  up to 16 Caltrans cameras within 1.5 km of that road, spread along it.
+- **Click the map** — click once for the start and again for the
+  destination (a third click starts over); same route + camera discovery.
+
+The overall route reading is always the worst of its segments (the same
+max-severity idea `fuse_labels` uses for one camera, extended across several),
+so a single jammed stretch is never hidden by an otherwise-clear route. The
+**route map** draws the real road path (OSRM, OpenStreetMap routing, free, no
+API key), numbered cameras, and A/B markers when the route came from places or
+clicks. Each stretch of road is colored from the nearest camera's reading:
+solid within 2 km, faded 2–8 km away (a weaker guess), gray beyond 8 km.
+These colors are estimates from scattered camera snapshots, not continuous
+traffic data like Google Maps has, and the app says so on the map. The listed
+travel time is free-flow (no traffic). Caltrans covers California only, so
+routes elsewhere stay gray. If OSRM can't be reached in camera mode, the map
+falls back to straight lines between cameras. Camera ordering in that mode is
+a nearest-neighbor chain from the western end of the farthest pair, which fits
+cameras along one road, not arbitrary scattered picks. The click map uses
+`streamlit-folium` with OpenStreetMap tiles.
 
 Command-line equivalents (no dashboard) are documented further down under
 [Run computer vision on a single frame](#run-computer-vision-on-a-single-frame)
@@ -139,7 +148,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (76 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (84 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -504,7 +513,8 @@ reuses signals the app already computes rather than adding a new model:
 - **🛣️ Route tab** — combine 2+ cameras into one reading using the same
   max-severity idea `fuse_labels` uses for a single camera, extended across
   several: the overall route congestion is always the worst segment, with a
-  per-camera breakdown showing which one is driving that result.
+  per-camera breakdown showing which one is driving that result. Routes can be
+  built from picked cameras, searched places, or two map clicks.
 
 See `tests/test_fusion.py` (anomaly + departure), `tests/test_explain.py`,
 and `tests/test_prediction_log.py`.
@@ -640,7 +650,7 @@ src/
   prediction_log.py   local per-camera prediction history log, powers the trend chart + map coloring
   weather.py          real current weather for a camera's coordinates via Open-Meteo (free, no API key)
   report.py           composes an annotated frame + summary panel into a downloadable PNG
-  route_map.py        orders cameras along a corridor, fetches the road path (OSRM), colors it from nearest cameras
+  route_map.py        geocoding (Nominatim), road path (OSRM), cameras along a route, nearest-camera coloring, map framing
   evaluate.py         trains all 3 models, prints/plots MAE/RMSE/R2 comparison
 tests/                pytest suite (fusion/anomaly/departure, explainability, prediction history, real weather,
                       report generation, route map, data pipeline, live inference, speed math, e-challan, ANPR, vehicle attrs)

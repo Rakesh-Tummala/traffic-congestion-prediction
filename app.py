@@ -11,13 +11,17 @@ import sys
 import time
 from datetime import datetime
 
+from concurrent.futures import ThreadPoolExecutor
+
 import altair as alt
 import cv2
+import folium
 import numpy as np
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
 from PIL import Image
+from streamlit_folium import st_folium
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
@@ -36,7 +40,10 @@ from prediction_log import load_history, log_prediction  # noqa: E402
 from explain import explain_prediction  # noqa: E402
 from weather import fetch_current_weather  # noqa: E402
 from report import build_report_png  # noqa: E402
-from route_map import MAX_CAMERA_DISTANCE_M, color_route, fetch_route, order_cameras  # noqa: E402
+from route_map import (  # noqa: E402
+    CAMERA_ON_ROUTE_M, FAR_CAMERA_DISTANCE_M, MAX_CAMERA_DISTANCE_M, cameras_near_route, color_route,
+    fetch_route, fit_view, geocode, order_cameras,
+)
 
 LEVEL_COLORS = {"Low": "#22c55e", "Moderate": "#eab308", "High": "#f97316", "Severe": "#ef4444"}
 LEVEL_COLORS_RGB = {"Low": [34, 197, 94], "Moderate": [234, 179, 8], "High": [249, 115, 22], "Severe": [239, 68, 68]}
@@ -63,6 +70,20 @@ def _cached_forecast(date_str: str, temp_c: float, rain_1h: float, snow_1h: floa
                       clouds_all: float, is_holiday: int, weather_main: str, model: str):
     base = datetime.strptime(date_str, "%Y-%m-%d")
     return forecast_day(base, temp_c, rain_1h, snow_1h, clouds_all, is_holiday, weather_main, model)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _all_cameras():
+    """Every Caltrans district's cameras in one list, so a route between any two
+    places can find the cameras along it. Districts that fail to load are skipped
+    rather than failing the whole route."""
+    def one(district):
+        try:
+            return fetch_cameras(district)
+        except Exception:
+            return []
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return [cam for batch in pool.map(one, DISTRICTS) for cam in batch]
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -257,25 +278,28 @@ def _route_rgba(label, alpha: int) -> list:
     return LEVEL_COLORS_RGB[label] + [alpha] if label else UNKNOWN_RGBA
 
 
-def _route_map(ordered: list):
-    """Draw the checked route: the real road path between its two end cameras,
-    colored stretch by stretch from the nearest camera's reading, with every
-    camera as a numbered dot. `ordered` is route results in route order. Falls
-    back to straight lines between cameras if the road path can't be fetched.
-    Nothing here is clickable, so per-row colors are safe (see camera_picker_map)."""
+def _route_map(ordered: list, route: dict = None, endpoints: tuple = None):
+    """Draw a route: the real road path colored stretch by stretch from the nearest
+    camera's reading (solid within 2 km, faded up to 8 km, gray beyond), every
+    camera as a numbered dot, and A/B markers for the endpoints when the route
+    came from places or map clicks. `ordered` is route results in route order.
+    When no road path is given it is fetched between the first and last camera,
+    falling back to straight lines if that fails. Nothing here is clickable, so
+    per-row colors are safe (see camera_picker_map)."""
     mapped = [r for r in ordered if r["camera"].get("latitude") and r["camera"].get("longitude")]
-    if len(mapped) < 2:
+    if route is None and len(mapped) < 2:
         return
 
     def latlon(r):
         return float(r["camera"]["latitude"]), float(r["camera"]["longitude"])
 
     readings = [(*latlon(r), r["final_label"]) for r in mapped if r["final_label"]]
-    route, route_error = None, None
-    try:
-        route = _cached_route(latlon(mapped[0]), latlon(mapped[-1]))
-    except Exception as e:
-        route_error = str(e)
+    route_error = None
+    if route is None:
+        try:
+            route = _cached_route(latlon(mapped[0]), latlon(mapped[-1]))
+        except Exception as e:
+            route_error = str(e)
 
     if route:
         runs = color_route(route["points"], readings)
@@ -284,13 +308,17 @@ def _route_map(ordered: list):
         for a, b in zip(mapped, mapped[1:]):
             labels = [x["final_label"] for x in (a, b) if x["final_label"]]
             (lat_a, lon_a), (lat_b, lon_b) = latlon(a), latlon(b)
-            runs.append({"label": max(labels, key=CONGESTION_LEVELS.index) if labels else None,
+            runs.append({"label": max(labels, key=CONGESTION_LEVELS.index) if labels else None, "near": True,
                          "path": [[lon_a, lat_a], [lon_b, lat_b]]})
 
-    path_rows = [{"path": run["path"], "color": _route_rgba(run["label"], 235)} for run in runs]
+    path_rows = [{"path": run["path"], "color": _route_rgba(run["label"], 235 if run["near"] else 120)}
+                 for run in runs]
     camera_rows = [{"lon": latlon(r)[1], "lat": latlon(r)[0], "n": str(i + 1),
                     "color": _route_rgba(r["final_label"], 255)} for i, r in enumerate(mapped)]
-    all_points = [pt for run in runs for pt in run["path"]] + [[c["lon"], c["lat"]] for c in camera_rows]
+    end_rows = ([{"lon": lon, "lat": lat, "n": letter} for letter, (lat, lon) in zip("AB", endpoints)]
+                if endpoints else [])
+    all_points = ([pt for run in runs for pt in run["path"]] + [[c["lon"], c["lat"]] for c in camera_rows]
+                  + [[e["lon"], e["lat"]] for e in end_rows])
 
     layers = [
         pdk.Layer("PathLayer", id="route-path", data=path_rows, get_path="path", get_color="color",
@@ -302,17 +330,34 @@ def _route_map(ordered: list):
                   get_text="n", get_size=14, get_color=[10, 10, 10, 255],
                   get_text_anchor="'middle'", get_alignment_baseline="'center'"),
     ]
-    view = pdk.data_utils.compute_view(all_points, view_proportion=0.85)
-    st.pydeck_chart(pdk.Deck(layers=layers, initial_view_state=view, map_style=None), height=420)
+    if end_rows:
+        layers += [
+            pdk.Layer("ScatterplotLayer", id="route-ends", data=end_rows, get_position=["lon", "lat"],
+                      get_fill_color=[255, 255, 255, 255], get_line_color=[10, 10, 10, 255], stroked=True,
+                      line_width_min_pixels=3, radius_min_pixels=14, get_radius=80),
+            pdk.Layer("TextLayer", id="route-end-letters", data=end_rows, get_position=["lon", "lat"],
+                      get_text="n", get_size=16, get_color=[10, 10, 10, 255], font_weight=700,
+                      get_text_anchor="'middle'", get_alignment_baseline="'center'"),
+        ]
+    if not all_points:
+        return
+    lat, lon, zoom = fit_view(all_points)
+    st.pydeck_chart(
+        pdk.Deck(layers=layers, initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=zoom),
+                 map_style=None),
+        height=420,
+    )
 
     if route:
         st.caption(f"Road path from OpenStreetMap (OSRM): {route['distance_m'] / 1000:.1f} km, about "
                    f"{route['duration_s'] / 60:.0f} min without traffic.")
     else:
         st.caption(f"Couldn't fetch the road path ({route_error}); showing straight lines between cameras instead.")
-    st.caption(f"Each stretch takes the color of the nearest camera within {MAX_CAMERA_DISTANCE_M / 1000:.0f} km "
-               "(gray = no camera close enough). These are estimates from scattered camera snapshots, not "
-               "continuous traffic data like a navigation app has. Numbers match the list below.")
+    st.caption(f"Colors come from the nearest camera: solid within {MAX_CAMERA_DISTANCE_M / 1000:.0f} km, "
+               f"faded {MAX_CAMERA_DISTANCE_M / 1000:.0f}–{FAR_CAMERA_DISTANCE_M / 1000:.0f} km away "
+               f"(a weaker guess), gray = no camera within {FAR_CAMERA_DISTANCE_M / 1000:.0f} km. These are "
+               "estimates from scattered camera snapshots, not continuous traffic data like a navigation app "
+               "has. Numbers match the list below.")
 
 
 st.set_page_config(page_title="Smart Traffic Congestion Prediction", layout="wide", page_icon="🚦")
@@ -927,120 +972,243 @@ with mode_grid:
                                            f"density {item['result']['density_ratio']}")
 
 # ---------------------------------------------------------------- route congestion
+ROUTE_MODES = ["Pick cameras", "Search places", "Click the map"]
+
+
+def _run_route_check(cams, weather, route=None, endpoints=None, in_route_order=False):
+    """Check every camera in `cams` (live frame, vehicle detection, fused with the
+    historical model) and store the outcome for _show_route_view()."""
+    temp, rain, clouds, weather_main = weather
+    try:
+        model_pred = predict_all_models(datetime.now(), temp, rain, 0.0, clouds, 0, weather_main)
+        hist_label = calibrated_label(model_pred["lstm"])
+    except Exception as e:
+        st.error(f"Historical model prediction failed: {e}")
+        hist_label = None
+
+    results = []
+    if cams:
+        progress = st.progress(0.0, text="Checking route segments...")
+        for i, c in enumerate(cams):
+            try:
+                cam_result = analyze_frame(load_frame(c["image_url"]))
+                cam_cv_label = congestion_from_density(cam_result["density_ratio"])
+                cam_final = fuse_labels(hist_label, cam_cv_label) if hist_label else cam_cv_label
+                results.append({"camera": c, "final_label": cam_final,
+                                "vehicle_count": cam_result["vehicle_count"], "error": None})
+            except Exception as e:
+                results.append({"camera": c, "final_label": None, "vehicle_count": None, "error": str(e)})
+            progress.progress((i + 1) / len(cams), text=f"Checked {i + 1}/{len(cams)}")
+        progress.empty()
+    st.session_state["route_view"] = {"results": results, "route": route, "endpoints": endpoints,
+                                      "in_route_order": in_route_order}
+
+
+def _check_between(start, end, weather):
+    """Route between two (lat, lon) points: fetch the road path, find the cameras
+    along it, and check them."""
+    try:
+        with st.spinner("Finding the road route..."):
+            route = _cached_route(tuple(start), tuple(end))
+    except Exception as e:
+        st.error(f"Couldn't get a driving route between those two points: {e}")
+        return
+    with st.spinner("Looking for traffic cameras along the route (the first search loads every "
+                    "Caltrans district, which takes a moment)..."):
+        cams = cameras_near_route(route["points"], _all_cameras())
+    _run_route_check(cams, weather, route=route, endpoints=(tuple(start), tuple(end)), in_route_order=True)
+
+
+def _show_route_view():
+    view = st.session_state.get("route_view")
+    if not view:
+        return
+    results, route, endpoints = view["results"], view["route"], view["endpoints"]
+
+    valid = [r for r in results if r["final_label"]]
+    if valid:
+        route_label = max((r["final_label"] for r in valid), key=CONGESTION_LEVELS.index)
+        worst_segment = next(r for r in valid if r["final_label"] == route_label)
+        st.markdown("###### Overall route congestion")
+        congestion_badge(route_label)
+        st.caption(f"Driven by the worst segment: **{worst_segment['camera']['name']}**")
+    elif results:
+        st.warning("Couldn't read any segment on this route right now.")
+    else:
+        st.info(f"No Caltrans cameras within {CAMERA_ON_ROUTE_M / 1000:.1f} km of this route, so there is "
+                "no congestion reading to show. Caltrans cameras only cover California highways.")
+
+    if view["in_route_order"]:
+        ordered = results  # already in the order they're met along the road
+    else:
+        # The multiselect hands cameras back in list order, not drive order, so put
+        # them in corridor order; cameras with no coordinates can't be placed and go last.
+        located = [r for r in results if r["camera"].get("latitude") and r["camera"].get("longitude")]
+        by_camera = {id(r["camera"]): r for r in located}
+        ordered = [by_camera[id(c)] for c in order_cameras([r["camera"] for r in located])] if located else []
+        ordered += [r for r in results if id(r["camera"]) not in by_camera]
+
+    st.markdown("###### Route map")
+    _route_map(ordered, route, endpoints)
+
+    if ordered:
+        st.markdown("###### Segment-by-segment")
+    for n, r in enumerate(ordered, start=1):
+        seg_cols = st.columns([3, 1, 1])
+        seg_cols[0].markdown(f"**{n}. {r['camera']['name']}** — {r['camera']['nearby_place']}")
+        if r["error"]:
+            seg_cols[1].caption(f"⚠️ {r['error']}")
+        else:
+            seg_cols[1].markdown(f"{r['vehicle_count']} vehicles")
+            color = LEVEL_COLORS[r["final_label"]]
+            seg_cols[2].markdown(
+                f"<span style='color:{color};font-weight:700'>{r['final_label']}</span>",
+                unsafe_allow_html=True,
+            )
+
+
 with mode_route:
-    st.subheader("Check congestion across multiple cameras on your route")
-    st.caption("Pick a district, then select every camera along your route (any order) to get one "
-               "overall reading — always driven by the worst segment, so a single jammed stretch is "
-               "never hidden by an otherwise-clear route.")
+    st.subheader("Route congestion")
 
     if not MODELS_READY:
         st.error(f"Trained model artifacts not found in {MODELS_DIR}. Run `python src/evaluate.py` first.")
     else:
-        rt1, rt2 = st.columns([1, 1])
-        with rt1:
-            route_district = st.selectbox("District", DISTRICTS, index=6, key="route_district",
-                                          format_func=lambda d: f"District {d}")
-        with rt2:
-            route_search = st.text_input("Filter by route / location", key="route_search")
+        route_mode = st.radio("Build the route by", ROUTE_MODES, horizontal=True, key="route_mode")
 
-        try:
-            route_cameras = _cached_cameras(route_district)
-        except Exception as e:
-            route_cameras = []
-            st.error(f"Could not reach Caltrans camera feed: {e}")
+        with st.expander("Weather assumptions (applied to every camera on the route)"):
+            rw1, rw2 = st.columns(2)
+            with rw1:
+                rt_temp = st.slider("Temperature (°C)", -20.0, 45.0, 20.0, key="route_temp")
+                rt_rain = st.number_input("Rain last hour (mm)", 0.0, 100.0, 0.0, key="route_rain")
+            with rw2:
+                rt_clouds = st.slider("Cloud cover (%)", 0, 100, 20, key="route_clouds")
+                rt_weather = st.selectbox("Weather", list(WEATHER_CODES.keys()), key="route_weather")
+        weather = (rt_temp, rt_rain, rt_clouds, rt_weather)
 
-        if route_search:
-            needle = route_search.lower()
-            route_cameras = [c for c in route_cameras
-                             if needle in c["name"].lower() or needle in c["nearby_place"].lower()]
+        if route_mode == ROUTE_MODES[0]:
+            st.caption("Pick a district, then select every camera along your route (any order) to get one "
+                       "overall reading, always driven by the worst segment, so a single jammed stretch is "
+                       "never hidden by an otherwise-clear route.")
+            rt1, rt2 = st.columns([1, 1])
+            with rt1:
+                route_district = st.selectbox("District", DISTRICTS, index=6, key="route_district",
+                                              format_func=lambda d: f"District {d}")
+            with rt2:
+                route_search = st.text_input("Filter by route / location", key="route_search")
 
-        if not route_cameras:
-            st.info("No cameras match that filter.")
-        else:
-            route_labels = [f"{c['name']} — {c['nearby_place']}" for c in route_cameras]
-            # Same stale-label issue as camera_picker_map: after a district or filter
-            # change, previously chosen cameras that aren't in the new list come back as
-            # label strings, which would crash `route_cameras[i]` below. Drop them.
-            previous = st.session_state.get("route_choice", [])
-            kept = [i for i in previous if _is_valid_index(i, len(route_cameras))]
-            if kept != previous:
-                st.session_state["route_choice"] = kept
-            chosen_idx = st.multiselect("Cameras along your route (pick 2 or more)", range(len(route_cameras)),
-                                        format_func=lambda i: route_labels[i], key="route_choice")
-            if not all(isinstance(i, int) for i in chosen_idx):
-                st.rerun()
+            try:
+                route_cameras = _cached_cameras(route_district)
+            except Exception as e:
+                route_cameras = []
+                st.error(f"Could not reach Caltrans camera feed: {e}")
 
-            with st.expander("Weather assumptions (applied to every camera on the route)"):
-                rw1, rw2 = st.columns(2)
-                with rw1:
-                    rt_temp = st.slider("Temperature (°C)", -20.0, 45.0, 20.0, key="route_temp")
-                    rt_rain = st.number_input("Rain last hour (mm)", 0.0, 100.0, 0.0, key="route_rain")
-                with rw2:
-                    rt_clouds = st.slider("Cloud cover (%)", 0, 100, 20, key="route_clouds")
-                    rt_weather = st.selectbox("Weather", list(WEATHER_CODES.keys()), key="route_weather")
+            if route_search:
+                needle = route_search.lower()
+                route_cameras = [c for c in route_cameras
+                                 if needle in c["name"].lower() or needle in c["nearby_place"].lower()]
 
-            if len(chosen_idx) < 2:
-                st.info("Select at least 2 cameras to build a route.")
-            elif st.button("Check route", type="primary"):
-                selected_cams = [route_cameras[i] for i in chosen_idx]
-                now = datetime.now()
+            if not route_cameras:
+                st.info("No cameras match that filter.")
+            else:
+                route_labels = [f"{c['name']} — {c['nearby_place']}" for c in route_cameras]
+                # Same stale-label issue as camera_picker_map: after a district or filter
+                # change, previously chosen cameras that aren't in the new list come back as
+                # label strings, which would crash `route_cameras[i]` below. Drop them.
+                previous = st.session_state.get("route_choice", [])
+                kept = [i for i in previous if _is_valid_index(i, len(route_cameras))]
+                if kept != previous:
+                    st.session_state["route_choice"] = kept
+                chosen_idx = st.multiselect("Cameras along your route (pick 2 or more)", range(len(route_cameras)),
+                                            format_func=lambda i: route_labels[i], key="route_choice")
+                if not all(isinstance(i, int) for i in chosen_idx):
+                    st.rerun()
+
+                if len(chosen_idx) < 2:
+                    st.info("Select at least 2 cameras to build a route.")
+                elif st.button("Check route", type="primary", key="route_check_cameras"):
+                    _run_route_check([route_cameras[i] for i in chosen_idx], weather)
+
+        elif route_mode == ROUTE_MODES[1]:
+            st.caption("Type a start and a destination (any place OpenStreetMap knows). The app finds the "
+                       "driving route and checks every Caltrans camera along it. Cameras only cover "
+                       "California highways, so stretches elsewhere stay gray.")
+            pc1, pc2 = st.columns(2)
+            start_q = pc1.text_input("Start", key="route_start_q", placeholder="e.g. Burbank Airport")
+            end_q = pc2.text_input("Destination", key="route_end_q", placeholder="e.g. Santa Monica Pier")
+            if st.button("Find places", key="route_find_places"):
                 try:
-                    model_pred = predict_all_models(now, rt_temp, rt_rain, 0.0, rt_clouds, 0, rt_weather)
-                    hist_label = calibrated_label(model_pred["lstm"])
+                    with st.spinner("Searching OpenStreetMap..."):
+                        st.session_state["geo_start"] = geocode(start_q)
+                        time.sleep(1.1)  # Nominatim's usage policy: at most one request per second
+                        st.session_state["geo_end"] = geocode(end_q)
                 except Exception as e:
-                    st.error(f"Historical model prediction failed: {e}")
-                    hist_label = None
+                    st.error(f"Place search failed: {e}")
 
-                segment_results = []
-                progress = st.progress(0.0, text="Checking route segments...")
-                for i, c in enumerate(selected_cams):
-                    try:
-                        cam_frame = load_frame(c["image_url"])
-                        cam_result = analyze_frame(cam_frame)
-                        cam_cv_label = congestion_from_density(cam_result["density_ratio"])
-                        cam_final = fuse_labels(hist_label, cam_cv_label) if hist_label else cam_cv_label
-                        segment_results.append({"camera": c, "final_label": cam_final,
-                                                "vehicle_count": cam_result["vehicle_count"], "error": None})
-                    except Exception as e:
-                        segment_results.append({"camera": c, "final_label": None,
-                                                "vehicle_count": None, "error": str(e)})
-                    progress.progress((i + 1) / len(selected_cams), text=f"Checked {i + 1}/{len(selected_cams)}")
-                progress.empty()
-                st.session_state["route_results"] = segment_results
+            geo_start, geo_end = st.session_state.get("geo_start"), st.session_state.get("geo_end")
+            if geo_start is None or geo_end is None:
+                st.info("Enter a start and a destination, then click Find places.")
+            elif not geo_start or not geo_end:
+                missing = " and ".join(n for n, g in (("the start", geo_start), ("the destination", geo_end)) if not g)
+                st.warning(f"No match found for {missing}. Try a more specific name, such as adding the city.")
+            else:
+                s_names, e_names = [p["name"] for p in geo_start], [p["name"] for p in geo_end]
+                # Options are the labels themselves; reset a leftover choice from an earlier search
+                # that isn't in the new list (see camera_picker_map for why stale labels bite).
+                for key, names in (("route_start_pick", s_names), ("route_end_pick", e_names)):
+                    if st.session_state.get(key) not in names:
+                        st.session_state[key] = names[0]
+                s_pick = st.selectbox("Start: pick the right match", s_names, key="route_start_pick")
+                e_pick = st.selectbox("Destination: pick the right match", e_names, key="route_end_pick")
+                s_place, e_place = geo_start[s_names.index(s_pick)], geo_end[e_names.index(e_pick)]
+                if st.button("Check route", type="primary", key="route_check_places"):
+                    _check_between((s_place["lat"], s_place["lon"]), (e_place["lat"], e_place["lon"]), weather)
 
-            route_results = st.session_state.get("route_results")
-            if route_results:
-                valid = [r for r in route_results if r["final_label"]]
-                if valid:
-                    route_label = max((r["final_label"] for r in valid), key=CONGESTION_LEVELS.index)
-                    worst_segment = next(r for r in valid if r["final_label"] == route_label)
-                    st.markdown("###### Overall route congestion")
-                    congestion_badge(route_label)
-                    st.caption(f"Driven by the worst segment: **{worst_segment['camera']['name']}**")
-                else:
-                    st.warning("Couldn't read any segment on this route right now.")
+        else:
+            st.caption("Click the map to drop the start, then click again for the destination (a third click "
+                       "starts over with a new start). The app finds the driving route and checks every "
+                       "Caltrans camera along it.")
+            pts = st.session_state.setdefault("route_click_pts", {"start": None, "end": None, "next": "start"})
+            view_center, view_zoom = st.session_state.get("route_click_view", ((34.05, -118.25), 9))
 
-                # Put the cameras in corridor order (the multiselect hands them back in
-                # list order, not in the order you'd drive them); cameras with no
-                # coordinates can't be placed, so they go last.
-                located = [r for r in route_results if r["camera"].get("latitude") and r["camera"].get("longitude")]
-                by_camera = {id(r["camera"]): r for r in located}
-                ordered = [by_camera[id(c)] for c in order_cameras([r["camera"] for r in located])] if located else []
-                ordered += [r for r in route_results if id(r["camera"]) not in by_camera]
+            fmap = folium.Map(location=view_center, zoom_start=view_zoom, tiles="OpenStreetMap")  # Carto's raster tiles now demand an API key
+            if pts["start"]:
+                folium.Marker(pts["start"], tooltip="Start",
+                              icon=folium.Icon(color="green", icon="play", prefix="fa")).add_to(fmap)
+            if pts["end"]:
+                folium.Marker(pts["end"], tooltip="Destination",
+                              icon=folium.Icon(color="red", icon="stop", prefix="fa")).add_to(fmap)
+            map_out = st_folium(fmap, height=420, use_container_width=True, key="route_click_map",
+                                returned_objects=["last_clicked", "center", "zoom"],
+                                center=view_center, zoom=view_zoom)
 
-                st.markdown("###### Route map")
-                _route_map(ordered)
+            if map_out:
+                if map_out.get("center") and map_out.get("zoom"):
+                    st.session_state["route_click_view"] = (
+                        (map_out["center"]["lat"], map_out["center"]["lng"]), map_out["zoom"])
+                click = map_out.get("last_clicked")
+                if click:
+                    click_key = (round(click["lat"], 6), round(click["lng"], 6))
+                    # The component keeps returning its last click on every rerun, so only act on a new one.
+                    if st.session_state.get("_route_last_click") != click_key:
+                        st.session_state["_route_last_click"] = click_key
+                        if pts["next"] == "start":
+                            pts["start"], pts["end"], pts["next"] = (click["lat"], click["lng"]), None, "end"
+                        else:
+                            pts["end"], pts["next"] = (click["lat"], click["lng"]), "start"
+                        st.rerun()
 
-                st.markdown("###### Segment-by-segment")
-                for n, r in enumerate(ordered, start=1):
-                    seg_cols = st.columns([3, 1, 1])
-                    seg_cols[0].markdown(f"**{n}. {r['camera']['name']}** — {r['camera']['nearby_place']}")
-                    if r["error"]:
-                        seg_cols[1].caption(f"⚠️ {r['error']}")
-                    else:
-                        seg_cols[1].markdown(f"{r['vehicle_count']} vehicles")
-                        color = LEVEL_COLORS[r["final_label"]]
-                        seg_cols[2].markdown(
-                            f"<span style='color:{color};font-weight:700'>{r['final_label']}</span>",
-                            unsafe_allow_html=True,
-                        )
+            status = ("Click the map to set the **start**." if pts["next"] == "start" and not pts["start"]
+                      else "Click the map to set the **destination**." if pts["next"] == "end"
+                      else "Both points set. Check the route, or click again to start over.")
+            st.caption(f"{status}  Start: {'set' if pts['start'] else 'not set'} · "
+                       f"Destination: {'set' if pts['end'] else 'not set'}")
+            cc1, cc2 = st.columns([1, 1])
+            if cc2.button("Clear points", key="route_clear_points"):
+                # Deliberately leaves _route_last_click alone: the map component still returns its
+                # old click, which would otherwise re-add the point just cleared.
+                st.session_state["route_click_pts"] = {"start": None, "end": None, "next": "start"}
+                st.rerun()
+            if pts["start"] and pts["end"] and cc1.button("Check route", type="primary", key="route_check_click"):
+                _check_between(pts["start"], pts["end"], weather)
+
+        _show_route_view()
