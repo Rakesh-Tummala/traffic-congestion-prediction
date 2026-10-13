@@ -64,8 +64,8 @@ def speed_scale(raw_speeds: list[float], reference_mph: float, min_tracks: int =
 class LiveMonitor:
     def __init__(self, stream_url: str, camera_name: str, limit_mph: float = 65.0, margin_mph: float = 15.0,
                  reference_mph: float = 60.0, run_seconds: float = 120.0, read_plates: bool = False,
-                 identify: bool = False, weights: str = "yolov8s.pt"):
-        self.stream_url, self.camera_name = stream_url, camera_name
+                 identify: bool = False, weights: str = "yolov8s.pt", limit_source: str = ""):
+        self.stream_url, self.camera_name, self.limit_source = stream_url, camera_name, limit_source
         self.limit_mph, self.margin_mph, self.reference_mph = limit_mph, margin_mph, reference_mph
         self.run_seconds, self.read_plates, self.identify, self.weights = run_seconds, read_plates, identify, weights
         self._lock = threading.Lock()
@@ -260,7 +260,7 @@ class LiveMonitor:
                 {"speeding": True, "cls_name": cls_name, "speed_mph": mph, "over_mph": mph - self.limit_mph},
                 self.camera_name, self.limit_mph, vehicle_number=plate_text,
                 plate_auto_detected=bool(plate_text), plate_confidence=plate_conf,
-                vehicle_description=desc, source="live monitor")
+                vehicle_description=desc, source="live monitor", limit_source=self.limit_source)
             append_to_log(challan)
             event["challan"] = challan
             event["status"] = "done"

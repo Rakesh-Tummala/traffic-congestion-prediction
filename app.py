@@ -40,6 +40,7 @@ from echallan import (  # noqa: E402
     render_challan_html, clear_log,
 )
 from live_monitor import LiveMonitor  # noqa: E402
+from speed_limits import lookup_async  # noqa: E402
 from live_video import hls_player_html, is_playable_url  # noqa: E402
 from anpr import read_plate  # noqa: E402
 from vehicle_attributes import describe_vehicle  # noqa: E402
@@ -115,6 +116,55 @@ def _cached_predict_all(now_minute: str, temp_c: float, rain_1h: float, snow_1h:
     now = datetime.strptime(now_minute, "%Y-%m-%d %H:%M")
     return predict_all_models(now, temp_c, rain_1h, snow_1h, clouds_all, is_holiday, weather_main,
                                lag_1h=lag_1h, lag_3h=lag_3h, lag_24h=lag_24h)
+
+
+def _limit_for_camera(cam: dict) -> dict | None:
+    """Posted speed limit for a camera's road from OpenStreetMap, without ever blocking the page.
+    While the lookup runs in the background this returns the provisional fallback (if any) and sets
+    st.session_state["_limit_pending"] so the page can poll and refresh when the real value arrives."""
+    try:
+        lat, lon = float(cam["latitude"]), float(cam["longitude"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    state = lookup_async(lat, lon, cam.get("route", ""))
+    st.session_state["_limit_pending"] = state["state"] == "pending"
+    return state["result"]
+
+
+@st.fragment(run_every=2.0)
+def _limit_poller():
+    """Runs only while a lookup is pending: when it finishes, do one full rerun to apply the result."""
+    if not st.session_state.get("_limit_pending"):
+        return
+    st.caption("🛣️ Looking up this road's speed limit on OpenStreetMap (a public server that is sometimes "
+               "slow). The page updates by itself when it answers.")
+    cam = st.session_state.get("_limit_cam_for_poll")
+    if cam and lookup_async(float(cam["latitude"]), float(cam["longitude"]), cam.get("route", ""))["state"] == "done":
+        st.rerun()
+
+
+def _apply_auto_limit(cam_key: str, info: dict | None, limit_key: str, ref_key: str | None = None) -> None:
+    """When the selected camera changes, set the limit widget (and typical-speed widget) from `info`.
+    Done only on a camera change so a value the user types afterwards is never overwritten."""
+    marker = (cam_key, bool(info and info.get("provisional")))  # re-apply once a provisional value is replaced
+    if st.session_state.get(f"_auto_limit_cam_{limit_key}") == marker:
+        return
+    if info and info["limit_mph"]:
+        st.session_state[limit_key] = float(info["limit_mph"])
+        if ref_key:
+            st.session_state[ref_key] = float(max(10, round(info["limit_mph"] * 0.9 / 5) * 5))
+    st.session_state[f"_auto_limit_cam_{limit_key}"] = marker
+
+
+def _limit_caption(info: dict | None, current: float) -> tuple[str, str]:
+    """(caption text, limit_source text for the challan) for the limit currently in the box."""
+    if info and info["limit_mph"]:
+        if abs(current - info["limit_mph"]) < 0.5:
+            return f"🛣️ {info['detail']}", f"OpenStreetMap: {info['detail']}"
+        return (f"🛣️ OpenStreetMap suggested {info['limit_mph']:.0f} mph ({info['detail']}) but you changed it.",
+                f"entered manually (OpenStreetMap suggested {info['limit_mph']:.0f} mph)")
+    return ("🛣️ Couldn't find this road's limit on OpenStreetMap right now, so it's a manual value.",
+            "entered manually")
 
 
 def congestion_badge(level: str, small: bool = False, key: str = ""):
@@ -436,6 +486,7 @@ with mode_single:
                                 st.session_state["live_frame"] = load_frame(cam["image_url"])
                                 st.session_state["live_frame_stream_url"] = cam.get("stream_url", "")
                                 st.session_state["live_frame_cam_name"] = cam["name"]
+                                st.session_state["live_frame_cam"] = cam
                                 st.session_state["live_frame_cam_lat"] = cam.get("latitude")
                                 st.session_state["live_frame_cam_lon"] = cam.get("longitude")
                                 st.session_state["frame_source"] = "live"
@@ -518,6 +569,7 @@ with mode_single:
                                 st.session_state["live_frame"] = load_frame(cam["image_url"])
                                 st.session_state["live_frame_stream_url"] = cam.get("stream_url", "")
                                 st.session_state["live_frame_cam_name"] = cam["name"]
+                                st.session_state["live_frame_cam"] = cam
                                 st.session_state["live_frame_cam_lat"] = cam.get("latitude")
                                 st.session_state["live_frame_cam_lon"] = cam.get("longitude")
                             except Exception as e:
@@ -759,7 +811,13 @@ with mode_single:
                                                    value=US_LANE_WIDTH_M, step=0.1,
                                                    help="US standard freeway lane width is ~3.7m.")
                 with sc3:
-                    speed_limit_mph = st.number_input("Speed limit (mph)", min_value=5.0, value=65.0, step=5.0)
+                    sc_info = (_limit_for_camera(st.session_state["live_frame_cam"])
+                               if st.session_state.get("live_frame_cam") else None)
+                    _apply_auto_limit(live_stream_url or "", sc_info, "speed_limit_single")
+                    speed_limit_mph = st.number_input("Speed limit (mph)", min_value=5.0, value=65.0, step=5.0,
+                                                      key="speed_limit_single")
+                    sc_caption, sc_limit_source = _limit_caption(sc_info, speed_limit_mph)
+                    st.caption(sc_caption)
 
                 if st.button("Check speeds"):
                     meters_per_pixel = lane_width_m / lane_width_px
@@ -768,6 +826,7 @@ with mode_single:
                             st.session_state["speed_result"] = check_speeds(live_stream_url, meters_per_pixel, speed_limit_mph)
                             st.session_state["speed_result_cam_name"] = live_cam_name
                             st.session_state["speed_result_limit_mph"] = speed_limit_mph
+                            st.session_state["speed_result_limit_source"] = sc_limit_source
                         except Exception as e:
                             st.error(f"Speed check failed: {e}")
                             st.session_state.pop("speed_result", None)
@@ -872,6 +931,7 @@ with mode_single:
                                     vehicle_number=vehicle_number,
                                     plate_auto_detected=is_auto,
                                     plate_confidence=plate_conf,
+                                    limit_source=st.session_state.get("speed_result_limit_source", ""),
                                 )
                                 append_to_log(challan)
                                 st.session_state["last_challan_html"] = render_challan_html(challan)
@@ -1360,6 +1420,15 @@ with mode_live:
         lm_pick = st.selectbox(f"Camera ({len(lm_cams)} with video)", lm_labels, key="live_camera")
         lm_cam = lm_cams[lm_labels.index(lm_pick)]
 
+        lm_auto = st.checkbox("Set the speed limit automatically from the camera's road (OpenStreetMap)",
+                              value=True, key="live_auto_limit")
+        lm_info = _limit_for_camera(lm_cam) if lm_auto else None
+        if lm_auto:
+            st.session_state["_limit_cam_for_poll"] = lm_cam
+            if st.session_state.get("_limit_pending"):
+                _limit_poller()
+        if lm_auto:
+            _apply_auto_limit(lm_cam["stream_url"], lm_info, "live_limit", "live_ref")
         lc1, lc2, lc3, lc4 = st.columns(4)
         lm_limit = lc1.number_input("Speed limit (mph)", min_value=5.0, value=65.0, step=5.0, key="live_limit")
         lm_margin = lc2.number_input("Challan only if over by (mph)", min_value=1.0, value=15.0, step=1.0,
@@ -1372,6 +1441,9 @@ with mode_live:
         lm_plates = lo1.checkbox("Try to read license plates (slow; plates are rarely legible)", key="live_plates")
         lm_ident = lo2.checkbox("Identify color and type (slow; first run downloads a model)", key="live_ident")
 
+        lm_caption, lm_limit_source = _limit_caption(lm_info, lm_limit) if lm_auto else ("", "entered manually")
+        if lm_caption:
+            st.caption(lm_caption)
         if lm_limit + lm_margin < lm_ref:
             st.caption("⚠️ The limit plus margin is below the typical traffic speed you set, so most vehicles "
                        "will count as violations. Raise the limit or the margin for a realistic run "
@@ -1383,7 +1455,8 @@ with mode_live:
                 old.stop()
             new_mon = LiveMonitor(lm_cam["stream_url"], f"{lm_cam['name']} ({lm_cam['nearby_place']})",
                                   limit_mph=lm_limit, margin_mph=lm_margin, reference_mph=lm_ref,
-                                  run_seconds=float(lm_secs), read_plates=lm_plates, identify=lm_ident)
+                                  run_seconds=float(lm_secs), read_plates=lm_plates, identify=lm_ident,
+                                  limit_source=lm_limit_source)
             new_mon.start()
             st.session_state["live_monitor"] = new_mon
             st.session_state.pop("_live_final_rerun", None)

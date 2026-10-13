@@ -57,6 +57,7 @@ class Challan:
     plate_confidence: float = 0.0
     vehicle_description: str = ""   # e.g. "white SUV (best guess)"; empty when not identified
     source: str = "manual"          # "manual" form, "speed check" burst, or "live monitor"
+    limit_source: str = ""          # where the speed limit came from, e.g. "OpenStreetMap: posted 65 mph"
 
 
 def compute_fine(vehicle_class: str, over_mph: float) -> tuple[int, str]:
@@ -70,7 +71,7 @@ def compute_fine(vehicle_class: str, over_mph: float) -> tuple[int, str]:
 def generate_challan(speed_result: dict, camera_name: str, speed_limit_mph: float,
                       vehicle_number: str = "", plate_auto_detected: bool = False,
                       plate_confidence: float = 0.0, vehicle_description: str = "",
-                      source: str = "speed check") -> Challan:
+                      source: str = "speed check", limit_source: str = "") -> Challan:
     """Build a Challan from one entry of speed_estimation.check_speeds()'s
     `results` list. Raises ValueError if the vehicle wasn't actually flagged
     as speeding — a challan should never be generated for a non-violation."""
@@ -94,6 +95,7 @@ def generate_challan(speed_result: dict, camera_name: str, speed_limit_mph: floa
         plate_confidence=round(plate_confidence, 3),
         vehicle_description=vehicle_description,
         source=source,
+        limit_source=limit_source,
     )
 
 
@@ -105,6 +107,8 @@ def render_challan_html(challan: Challan) -> str:
         plate_note = "no plate could be read from the video"
     else:
         plate_note = "entered manually"
+    limit_note = (f'<div style="font-size:11px;opacity:0.6;">({escape(c.limit_source)})</div>'
+                  if c.limit_source else "")
     desc_row = (f'<tr><td style="padding:3px 0;opacity:0.7;">Appearance</td><td>{escape(c.vehicle_description)}</td></tr>'
                 if c.vehicle_description else "")
     return f"""
@@ -123,7 +127,7 @@ max-width:480px;background:#1a0f0f;">
     <div style="font-size:11px;opacity:0.6;">({escape(plate_note)})</div></td></tr>
     {desc_row}<tr><td style="padding:3px 0;opacity:0.7;">Violation</td><td>Over-speeding</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Detected speed</td><td>{c.speed_mph:.1f} mph</td></tr>
-    <tr><td style="padding:3px 0;opacity:0.7;">Speed limit</td><td>{c.speed_limit_mph:.0f} mph</td></tr>
+    <tr><td style="padding:3px 0;opacity:0.7;">Speed limit</td><td>{c.speed_limit_mph:.0f} mph{limit_note}</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Over limit by</td><td>{c.over_mph:.1f} mph</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Fine that would have applied</td><td><b>₹{c.fine_inr}</b> (not charged)</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Reference law</td><td style="font-size:12px;">{escape(c.legal_reference)}</td></tr>

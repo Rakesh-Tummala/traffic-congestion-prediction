@@ -43,3 +43,30 @@ def test_empty_or_missing_frame_is_not_flagged():
 def test_analyze_frame_refuses_the_placeholder_instead_of_reporting_an_empty_road():
     with pytest.raises(CameraUnavailableError):
         analyze_frame(_placeholder())
+
+
+def test_tile_windows_cover_the_whole_frame_with_overlap():
+    from cv_module import tile_windows
+    wins = tile_windows(720, 1280, (2, 2), overlap=0.2)
+    assert len(wins) == 4
+    assert min(w[0] for w in wins) == 0 and max(w[2] for w in wins) == 1280
+    assert min(w[1] for w in wins) == 0 and max(w[3] for w in wins) == 720
+    left, right = wins[0], wins[1]
+    assert right[0] < left[2]  # neighbours overlap, so a car on the seam is whole in one of them
+
+
+def test_merge_boxes_drops_a_car_found_twice_and_the_fragment_cut_by_a_tile_edge():
+    from cv_module import merge_boxes
+    full = {"box": (100, 100, 200, 160), "conf": 0.9, "cls_id": 2}
+    dup = {"box": (102, 101, 199, 161), "conf": 0.6, "cls_id": 2}      # same car, second window
+    fragment = {"box": (100, 100, 130, 160), "conf": 0.5, "cls_id": 2}  # left sliver of it, cut by a tile edge
+    other = {"box": (400, 100, 500, 160), "conf": 0.7, "cls_id": 2}
+    kept = merge_boxes([dup, other, fragment, full])
+    assert full in kept and other in kept and len(kept) == 2
+
+
+def test_merge_boxes_keeps_overlapping_boxes_of_different_classes():
+    from cv_module import merge_boxes
+    car = {"box": (100, 100, 200, 160), "conf": 0.9, "cls_id": 2}
+    truck = {"box": (100, 100, 200, 160), "conf": 0.8, "cls_id": 7}
+    assert len(merge_boxes([car, truck])) == 2

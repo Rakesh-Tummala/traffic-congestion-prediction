@@ -16,3 +16,4 @@ yolov8*.pt
 cv_eval/sheets/
 cv_eval/sheets_labelled/
 cv_eval/results/detections/
+models/speed_limits_cache.json

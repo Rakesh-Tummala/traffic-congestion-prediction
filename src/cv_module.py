@@ -86,37 +86,97 @@ def is_unavailable_frame(frame: np.ndarray) -> bool:
     return float((frame.min(axis=2) >= 235).mean()) >= UNAVAILABLE_WHITE_FRACTION
 
 
-def analyze_frame(frame: np.ndarray, conf: float = DEFAULT_CONF):
+def tile_windows(height: int, width: int, grid: tuple[int, int] = (2, 2), overlap: float = 0.2):
+    """Overlapping (x0, y0, x1, y1) windows covering the frame, grid[0] columns by grid[1] rows."""
+    cols, rows = grid
+    tw, th = width / (cols - (cols - 1) * overlap), height / (rows - (rows - 1) * overlap)
+    xs = [round(i * (width - tw) / max(1, cols - 1)) for i in range(cols)]
+    ys = [round(j * (height - th) / max(1, rows - 1)) for j in range(rows)]
+    return [(x, y, min(width, round(x + tw)), min(height, round(y + th))) for y in ys for x in xs]
+
+
+def merge_boxes(dets: list[dict], ios_threshold: float = 0.6) -> list[dict]:
+    """Drop duplicate detections of the same vehicle found by overlapping windows.
+
+    Highest confidence first; a box is dropped if, for a kept box of the same class, the
+    intersection covers more than `ios_threshold` of the SMALLER box (intersection over
+    smaller, not IoU: a car cut by a tile edge is a small fragment of the whole car and has a
+    low IoU with it, but is almost entirely inside it)."""
+    kept: list[dict] = []
+    for d in sorted(dets, key=lambda x: -x["conf"]):
+        x1, y1, x2, y2 = d["box"]
+        area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        duplicate = False
+        for k in kept:
+            if k["cls_id"] != d["cls_id"]:
+                continue
+            kx1, ky1, kx2, ky2 = k["box"]
+            iw, ih = min(x2, kx2) - max(x1, kx1), min(y2, ky2) - max(y1, ky1)
+            if iw <= 0 or ih <= 0:
+                continue
+            smaller = min(area, max(0.0, kx2 - kx1) * max(0.0, ky2 - ky1))
+            if smaller > 0 and iw * ih / smaller > ios_threshold:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(d)
+    return kept
+
+
+def detect_vehicles_raw(model, frame: np.ndarray, conf: float, imgsz: int = 640, tiled: bool = False,
+                        grid: tuple[int, int] = (2, 2)) -> list[dict]:
+    """Vehicle boxes as dicts {box, conf, cls_id}. With tiled=True the frame is also searched in
+    overlapping windows (each upscaled to the model's input size), which finds small, distant
+    vehicles the single full-frame pass misses; results are merged with merge_boxes()."""
+    ids = list(VEHICLE_CLASS_IDS.keys())
+
+    def run(img, dx=0, dy=0):
+        res = model.predict(img, conf=conf, imgsz=imgsz, classes=ids, verbose=False)[0]
+        out = []
+        for b in res.boxes:
+            x1, y1, x2, y2 = b.xyxy[0].tolist()
+            out.append({"box": (x1 + dx, y1 + dy, x2 + dx, y2 + dy), "conf": float(b.conf.item()),
+                        "cls_id": int(b.cls.item())})
+        return out
+
+    dets = run(frame)
+    if tiled:
+        h, w = frame.shape[:2]
+        for x0, y0, x1, y1 in tile_windows(h, w, grid):
+            dets += run(frame[y0:y1, x0:x1], x0, y0)
+        dets = merge_boxes(dets)
+    return dets
+
+
+def analyze_frame(frame: np.ndarray, conf: float = DEFAULT_CONF, tiled: bool = False):
     """Run detection on a frame; return vehicle count, density ratio, and per-class breakdown.
+    `tiled=True` is the slower, more sensitive mode for distant vehicles (about 5 model passes).
     Raises CameraUnavailableError for a camera's "Temporarily Unavailable" placeholder."""
     if is_unavailable_frame(frame):
         raise CameraUnavailableError("This camera's feed is temporarily unavailable (Caltrans "
                                      "placeholder image), so there is nothing to detect.")
     model = get_model()
-    results = model.predict(frame, conf=conf, classes=list(VEHICLE_CLASS_IDS.keys()), verbose=False)[0]
-
     h, w = frame.shape[:2]
-    frame_area = h * w
+    dets = detect_vehicles_raw(model, frame, conf, tiled=tiled)
+
     boxes_area = 0.0
     counts = {name: 0 for name in VEHICLE_CLASS_IDS.values()}
-
-    for box in results.boxes:
-        cls_id = int(box.cls.item())
-        name = VEHICLE_CLASS_IDS.get(cls_id)
-        if name is None:
-            continue
+    annotated = frame.copy()
+    for d in dets:
+        name = VEHICLE_CLASS_IDS[d["cls_id"]]
         counts[name] += 1
-        x1, y1, x2, y2 = box.xyxy[0].tolist()
+        x1, y1, x2, y2 = d["box"]
         boxes_area += max(0.0, (x2 - x1)) * max(0.0, (y2 - y1))
+        cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), (255, 144, 30), 2)
+        cv2.putText(annotated, f"{name} {d['conf']:.2f}", (int(x1), max(12, int(y1) - 4)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 144, 30), 1)
 
-    total_vehicles = sum(counts.values())
-    density_ratio = min(1.0, boxes_area / frame_area) if frame_area else 0.0
-
+    density_ratio = min(1.0, boxes_area / (h * w)) if h * w else 0.0
     return {
-        "vehicle_count": total_vehicles,
+        "vehicle_count": sum(counts.values()),
         "density_ratio": round(density_ratio, 4),
         "counts_by_class": counts,
-        "annotated_frame": results.plot(),
+        "annotated_frame": annotated,
     }
 
 

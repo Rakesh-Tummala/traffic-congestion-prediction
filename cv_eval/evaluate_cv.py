@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-from cv_module import VEHICLE_CLASS_IDS  # noqa: E402
+from cv_module import VEHICLE_CLASS_IDS, detect_vehicles_raw  # noqa: E402
 
 LEVELS = ["Low", "Moderate", "High", "Severe"]
 CURRENT_THRESHOLDS = (0.05, 0.15, 0.30)  # congestion_from_density in src/cv_module.py
@@ -40,10 +40,12 @@ DET_DIR = os.path.join(RESULTS, "detections")
 
 
 # ---------------------------------------------------------------- detection
-def detect_all(weights: str, imgsz: int, ids: list[str]) -> dict:
-    """{frame_id: [[conf, area_fraction], ...]} for every vehicle box above DETECT_CONF."""
+def detect_all(weights: str, imgsz: int, ids: list[str], tiled: bool = False) -> dict:
+    """{frame_id: [[conf, area_fraction], ...]} for every vehicle box above DETECT_CONF.
+    tiled=True uses overlapping windows as well (cv_module.detect_vehicles_raw)."""
     os.makedirs(DET_DIR, exist_ok=True)
-    cache = os.path.join(DET_DIR, f"{os.path.splitext(os.path.basename(weights))[0]}_{imgsz}_c{DETECT_CONF}.json")
+    stem = os.path.splitext(os.path.basename(weights))[0]
+    cache = os.path.join(DET_DIR, f"{stem}_{imgsz}{'_tiled' if tiled else ''}_c{DETECT_CONF}.json")
     cached = json.load(open(cache)) if os.path.exists(cache) else {}
     todo = [i for i in ids if i not in cached]
     if todo:
@@ -52,15 +54,11 @@ def detect_all(weights: str, imgsz: int, ids: list[str]) -> dict:
         for n, fid in enumerate(todo, 1):
             frame = cv2.imread(os.path.join(HERE, "frames", f"{fid}.jpg"))
             h, w = frame.shape[:2]
-            res = model.predict(frame, conf=DETECT_CONF, imgsz=imgsz,
-                                classes=list(VEHICLE_CLASS_IDS), verbose=False)[0]
-            boxes = []
-            for b in res.boxes:
-                x1, y1, x2, y2 = b.xyxy[0].tolist()
-                boxes.append([float(b.conf.item()), max(0.0, x2 - x1) * max(0.0, y2 - y1) / (h * w)])
-            cached[fid] = boxes
+            dets = detect_vehicles_raw(model, frame, DETECT_CONF, imgsz=imgsz, tiled=tiled)
+            cached[fid] = [[d["conf"], max(0.0, d["box"][2] - d["box"][0]) * max(0.0, d["box"][3] - d["box"][1]) / (h * w)]
+                           for d in dets]
             if n % 25 == 0:
-                print(f"  {weights}@{imgsz}: {n}/{len(todo)}", flush=True)
+                print(f"  {weights}@{imgsz}{' tiled' if tiled else ''}: {n}/{len(todo)}", flush=True)
         json.dump(cached, open(cache, "w"))
     return cached
 
@@ -166,6 +164,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--models", nargs="+", default=["yolov8n.pt", "yolov8s.pt", "yolov8m.pt"])
     ap.add_argument("--imgsz", type=int, nargs="+", default=[640, 1280])
+    ap.add_argument("--tiled-models", nargs="*", default=["yolov8s.pt"],
+                    help="models to also run with sliced (tiled) inference")
     ap.add_argument("--confs", type=float, nargs="+", default=[0.05, 0.08, 0.10, 0.15, 0.25, 0.35])
     args = ap.parse_args()
 
@@ -179,16 +179,25 @@ def main():
 
     # 1. counting sweep
     rows, store = [], {}
-    for weights, imgsz in itertools.product(args.models, args.imgsz):
-        dets = detect_all(weights, imgsz, ids)
+    configs = [(w, sz, False) for w, sz in itertools.product(args.models, args.imgsz)]
+    configs += [(w, 640, True) for w in args.tiled_models]
+    for weights, imgsz, tiled in configs:
+        dets = detect_all(weights, imgsz, ids, tiled=tiled)
+        name = weights.replace(".pt", "") + ("+tiled" if tiled else "")
         for conf in args.confs:
             c, d = counts_and_density(dets, ids, conf)
-            store[(weights, imgsz, conf)] = (c, d)
-            rows.append({"model": weights.replace(".pt", ""), "imgsz": imgsz, "conf": conf,
-                         **count_metrics(true_count, c)})
+            store[(name + ".pt", imgsz, conf)] = (c, d)
+            rows.append({"model": name, "imgsz": imgsz, "conf": conf, **count_metrics(true_count, c)})
     sweep = pd.DataFrame(rows).sort_values("MAE").reset_index(drop=True)
 
     baseline_key = ("yolov8s.pt", 640, 0.25)
+    shipped_key = ("yolov8s.pt", 640, 0.08)
+    settings = [("Before tuning", baseline_key), ("Shipped setting (full frame)", shipped_key)]
+    tiled_rows = sweep[sweep.model.str.contains("tiled")]
+    if len(tiled_rows):
+        t = tiled_rows.iloc[0]
+        settings.append(("Best sliced (tiled) setting", (t.model + ".pt", int(t.imgsz), float(t.conf))))
+    settings.append(("Best setting by MAE", None))
     best_key = (sweep.loc[0, "model"] + ".pt", int(sweep.loc[0, "imgsz"]), float(sweep.loc[0, "conf"]))
     out = ["# CV evaluation results", "",
            f"Usable labelled frames: {len(ids)} (class counts: "
@@ -197,7 +206,8 @@ def main():
            "`within` = share of frames where the count is within max(2, 25%) of the hand count.", "",
            md_table(sweep), ""]
 
-    for title, key in (("Current setting", baseline_key), ("Best setting by MAE", best_key)):
+    settings = [(t, k if k is not None else best_key) for t, k in settings]
+    for title, key in settings:
         if key not in store:
             continue
         c, _ = store[key]
@@ -212,7 +222,7 @@ def main():
             f"scores accuracy {majority:.2f}; compare balanced accuracy (mean recall per class) "
             "and macro-F1, which that shortcut cannot game.", ""]
     summary = {}
-    for title, key in (("Current setting", baseline_key), ("Best setting by MAE", best_key)):
+    for title, key in settings:
         if key not in store:
             continue
         c, d = store[key]

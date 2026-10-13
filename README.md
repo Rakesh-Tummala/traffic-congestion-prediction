@@ -153,7 +153,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (113 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (127 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -609,6 +609,21 @@ See `tests/test_weather.py` and `tests/test_report.py`.
   generate a challan from made-up values to demo the document itself. Still a simulation:
   see the disclaimer in the app and the section above.
 
+**Automatic speed limit.** The speed limit is no longer something you have to type. For the
+camera you pick, `src/speed_limits.py` finds the road it watches and reads that road's `maxspeed`
+tag from OpenStreetMap (Overpass API, free, no key): it prefers a nearby road whose route
+reference matches the camera's (so a camera on an overpass reports the freeway, not the street
+crossing it), then the nearest motorway. Checked live: the I-110 Arroyo Seco Parkway reports
+55 mph and the I-5 Santa Ana Freeway 65 mph, which match the real posted limits. It also fills
+in the typical-traffic-speed setting (90% of the limit). The challan records where the limit came
+from ("Posted limit from OpenStreetMap for ..." or "entered manually"). You can still overwrite
+the number. The public Overpass servers are often slow or busy, so: the lookup runs in a background
+thread (the page never waits; it shows a clearly-labelled provisional value, 65 mph for
+Interstate/US routes, and updates itself when the answer arrives), it tries three mirrors, and a
+found limit is remembered on disk so each camera needs only one successful lookup. If a road has no
+tag, a typical value for that road class is used and marked as assumed, not posted. Limits are
+whatever OpenStreetMap contributors entered, so they can be missing or out of date.
+
 **How the Live monitor's speed works, and why to be skeptical of it.** These cameras publish
 no calibration, so speed is inferred. (1) A flat-road pinhole-camera model is fitted from the
 cars themselves: for a camera looking along a road, a car's ground row and pixel width are
@@ -701,6 +716,18 @@ Label accuracy alone is misleading: 74% of usable frames are Low, so "always Low
 detector still undercounts very dense or distant traffic (e.g. a wide 8-lane freeway
 frame with ~45 vehicles was read as 9), so congested roads are more likely to be
 under-labelled than over-labelled.
+
+**Two more things tried, neither adopted.** *Sliced (tiled) inference*, which also runs the
+detector on four overlapping windows so distant cars get more pixels (`detect_vehicles_raw`
+in `src/cv_module.py`, merged with an intersection-over-smaller rule so cars cut by a window edge
+are not double-counted), improved count MAE only from 4.55 to 4.32 (and 21+ vehicle frames from
+12.6 to 12.1) at about five times the compute, so it is not the default; the dense-traffic
+undercount is not mainly a small-object-resolution problem. *A learned congestion classifier*
+(logistic regression, random forest, gradient boosting on count / density / box-size features,
+repeated 5-fold cross-validation) scored balanced accuracy 0.41-0.54 against 0.62 for the plain
+fixed thresholds, so the simple rule stays; with 124 frames (10 High/Severe) there is not enough
+data for a learned model to win. Details: `cv_eval/results/report.md` and
+`cv_eval/results/learned_classifier.md`.
 
 **Honest caveats.** The confidence value was picked from a handful of options on the same
 frames it is scored on, so the improvement is slightly optimistic. The set is daytime
@@ -819,6 +846,7 @@ src/
   report.py           composes an annotated frame + summary panel into a downloadable PNG
   live_monitor.py     background worker: detection + tracking + speed + automatic challans on a live stream
   vehicle_tracking.py tracker, camera calibration from the traffic itself, speed estimation
+  speed_limits.py     posted speed limit for a camera's road from OpenStreetMap (non-blocking, cached)
   live_video.py       embeds a camera's live HLS video stream (hls.js) in the dashboard
   ui_theme.py         the 'traffic control room' look: CSS, animated header, glowing badge, counter, status messages
   route_map.py        geocoding (Nominatim), road path (OSRM), cameras along a route, nearest-camera coloring, map framing
