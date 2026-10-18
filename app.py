@@ -27,6 +27,7 @@ from streamlit_folium import st_folium
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from cv_module import analyze_frame, congestion_from_density, load_frame  # noqa: E402
+from camera_time import camera_now  # noqa: E402
 from ui_theme import badge_html, counter_html, header_html, status_message, theme_css  # noqa: E402
 from data_loader import WEATHER_CODES  # noqa: E402
 from live_cameras import DISTRICTS, fetch_cameras  # noqa: E402
@@ -627,6 +628,7 @@ with mode_single:
                     live_cam_name = None  # explicit reset — see the comment in tab_upload above
 
         st.subheader("2. Conditions")
+        st.caption(f"Predictions use California time, where the cameras are: {camera_now():%A %H:%M}.")
         c1, c2 = st.columns(2)
         with c1:
             temp_c = st.slider("Temperature (°C)", -20.0, 45.0, 20.0, key="weather_temp")
@@ -667,7 +669,7 @@ with mode_single:
 
             annotated_rgb = cv2.cvtColor(cv_result["annotated_frame"], cv2.COLOR_BGR2RGB)
 
-            now = datetime.now()
+            now = camera_now()  # California time: the cameras' clock, not this computer's
             try:
                 predictions = _cached_predict_all(now.strftime("%Y-%m-%d %H:%M"), temp_c, rain_1h, snow_1h,
                                                    clouds_all, int(is_holiday), weather_main,
@@ -1003,7 +1005,7 @@ with mode_grid:
 
             if st.button("Load grid", type="primary"):
                 selected_cams = grid_cameras[:n_cams]
-                now = datetime.now()
+                now = camera_now()
                 try:
                     model_pred = predict_all_models(now, g_temp, g_rain, 0.0, g_clouds, 0, g_weather)
                     hist_label = calibrated_label(model_pred["lstm"])
@@ -1073,7 +1075,7 @@ def _run_route_check(cams, weather, route=None, endpoints=None, in_route_order=F
     historical model) and store the outcome for _show_route_view()."""
     temp, rain, clouds, weather_main = weather
     try:
-        model_pred = predict_all_models(datetime.now(), temp, rain, 0.0, clouds, 0, weather_main)
+        model_pred = predict_all_models(camera_now(), temp, rain, 0.0, clouds, 0, weather_main)
         hist_label = calibrated_label(model_pred["lstm"])
     except Exception as e:
         st.error(f"Historical model prediction failed: {e}")

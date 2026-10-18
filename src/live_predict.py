@@ -12,6 +12,7 @@ import pandas as pd
 import torch
 
 from cv_module import CONGESTION_LEVELS, analyze_frame, congestion_from_density, load_frame
+from camera_time import camera_now
 from data_loader import FEATURE_COLUMNS, WEATHER_CODES, load_dataset
 from train_dl import SEQ_LEN, TrafficLSTM
 
@@ -240,7 +241,7 @@ def main():
     print(f"[CV] vehicle_count={cv_result['vehicle_count']}  density_ratio={cv_result['density_ratio']}  "
           f"image-based congestion={cv_label}")
 
-    now = datetime.now()
+    now = camera_now()
     predictions = predict_all_models(now, args.temp_c, args.rain_1h, args.snow_1h, args.clouds_all,
                                       args.is_holiday, args.weather_main,
                                       lag_1h=args.lag_1h, lag_3h=args.lag_3h, lag_24h=args.lag_24h)

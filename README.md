@@ -153,7 +153,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (129 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (133 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -786,6 +786,13 @@ camera-snapshot route coloring with a continuous traffic feed.
 
 ---
 
+**Time zone.** The historical models take an hour, weekday and month, so they must be asked about
+the cameras' time, not the computer's. An earlier version used the computer's clock; a laptop set to
+another time zone asked the models about Sunday afternoon rush hour while it was 03:46 in California,
+and the app showed a false "Unusual congestion detected". Found by a full test pass. Predictions,
+the forecast, the report footer and challan timestamps now use California time
+(`src/camera_time.py`; challans carry the UTC offset), and the Conditions section says which time is in use.
+
 ## Setup
 
 ```bash
@@ -857,6 +864,7 @@ src/
   report.py           composes an annotated frame + summary panel into a downloadable PNG
   live_monitor.py     background worker: detection + tracking + speed + automatic challans on a live stream
   vehicle_tracking.py tracker, camera calibration from the traffic itself, speed estimation
+  camera_time.py      California time for model inputs (the cameras' clock, not this computer's)
   speed_limits.py     posted speed limit for a camera's road from OpenStreetMap (non-blocking, cached)
   live_video.py       embeds a camera's live HLS video stream (hls.js) in the dashboard
   ui_theme.py         the 'traffic control room' look: CSS, animated header, glowing badge, counter, status messages

@@ -21,6 +21,8 @@ from dataclasses import MISSING, asdict, dataclass, fields
 from datetime import datetime
 from html import escape
 
+from camera_time import camera_now_iso
+
 DISCLAIMER = (
     "SIMULATED — SHOWS WHAT THE FINE WOULD HAVE BEEN, FOR DEMONSTRATION / EDUCATIONAL "
     "PURPOSES ONLY. No real citation was issued and no fine was charged. Not connected to "
@@ -81,7 +83,7 @@ def generate_challan(speed_result: dict, camera_name: str, speed_limit_mph: floa
     fine_inr, legal_ref = compute_fine(speed_result["cls_name"], speed_result["over_mph"])
     return Challan(
         challan_id=f"DEMO-{uuid.uuid4().hex[:10].upper()}",
-        issued_at=datetime.now().isoformat(timespec="seconds"),
+        issued_at=camera_now_iso(),  # camera (California) time with its UTC offset
         camera_name=camera_name,
         vehicle_class=speed_result["cls_name"],
         vehicle_number=vehicle_number.strip() or ("NOT READ (plate not legible)" if source == "live monitor"

@@ -6,6 +6,7 @@ import io
 from datetime import datetime
 
 import cv2
+from camera_time import camera_now
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
@@ -57,7 +58,7 @@ def build_report_png(annotated_frame_bgr: np.ndarray, camera_name: str, congesti
     info_lines = [
         camera_name,
         f"{vehicle_count} vehicles detected  ·  density {density_ratio:.4f}  ·  model: {model_name}",
-        f"Smart Traffic Congestion Prediction  ·  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Smart Traffic Congestion Prediction  ·  {camera_now().strftime('%Y-%m-%d %H:%M:%S')} California time",
     ]
     for i, line in enumerate(info_lines):
         draw.text((20, h + 78 + i * 24), line, font=font_small, fill=TEXT_RGB)
