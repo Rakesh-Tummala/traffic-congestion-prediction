@@ -19,7 +19,7 @@ button names. Total: about 12 minutes if you do everything, 6 if you only do the
    will show "calibrating" because there are too few cars. Have a screen recording of it working ready.
 2. **Run the readiness check:** `python demo_check.py`. It tests every online service and lists the
    busiest cameras with working video right now. Note the top one and use it in step 5.
-3. **Start the app:** `.venv\\Scripts\\streamlit run app.py`, open http://localhost:8501.
+3. **Start the app:** `.venv\Scripts\streamlit run app.py`, open http://localhost:8501.
 4. **Warm everything up** by visiting every tab once and pressing Fetch live snapshot, Load grid and
    Start monitoring (then Stop). The first run of each loads models and is slow; the second is fast.
 5. **Have backups:** screenshots of each tab, and a short screen recording of the Live e-Challan tab.
