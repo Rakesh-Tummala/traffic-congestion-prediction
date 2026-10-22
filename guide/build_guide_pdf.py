@@ -2,7 +2,7 @@
 
     python guide/build_guide_pdf.py            # writes Demo_and_Study_Guide.pdf in the project folder
 
-Sources: DEMO_SCRIPT.md, PROJECT_PRESENTATION_GUIDE.md (read, never modified: a few lines that are now out of
+Sources: DEMO_SCRIPT.md, guide/concepts.md (Part C), PROJECT_PRESENTATION_GUIDE.md (read, never modified: a few lines that are now out of
 date are patched in memory), and guide/new_lessons.md (Lessons 11-15 and extra questions). Needs reportlab.
 """
 import os
@@ -338,6 +338,10 @@ def build():
         "<b>Part B: Learning Guide.</b> Read this before presenting so you can explain every part: the data, the models, "
         "the computer vision, the fusion, and the newer features (lessons 11 to 15), plus a 2-minute script and "
         "interview questions.<br/><br/>"
+        "<b>Part C: Concepts and Talking Points.</b> Plain-language answers to \"what is X?\" and \"how does Y work?\": "
+        "YOLO, CNN, OpenCV, OCR, how the three ML models are calculated and trained, the dataset, the decimal numbers "
+        "and formulas, why California, what makes the project different, which cameras to use, and two scripts to "
+        "read aloud.<br/><br/>"
         "<font color='#5B6B7A'>Prepared " + date.today().strftime("%d %B %Y") + ". The simulated challans are a demonstration, "
         "not real enforcement.</font>", S["body"])]], colWidths=[avail])
     how.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), PANEL), ("BOX", (0, 0), (-1, -1), 0.6, LINE),
@@ -352,6 +356,12 @@ def build():
     story += [PageBreak(), Heading("Part B: Learning Guide", S["h1"], toc_level=0)]
     story += flowables(parse(guide_intro), avail)
     story += flowables(parse(guide_rest), avail, page_break_h2=False)
+
+    concepts = read(os.path.join(HERE, "concepts.md"))
+    concepts_intro, concepts_rest = split_h1(concepts)
+    story += [PageBreak(), Heading("Part C: Concepts and Talking Points", S["h1"], toc_level=0)]
+    story += flowables(parse(concepts_intro), avail)
+    story += flowables(parse(concepts_rest), avail)
 
     doc.multiBuild(story)
     print("Wrote", OUT)
