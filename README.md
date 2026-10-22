@@ -49,12 +49,12 @@ all wrapped in a Streamlit dashboard.
    - **All three models** compared side by side (predicted volume, R²,
      level) — not just the one you picked.
    - **⚠️ Unusual congestion detected** (when it fires) — shown when the live
-     camera and the historical model disagree sharply (2+ severity levels
-     apart, e.g. Low vs. High). A gap that large usually means something
-     out of the ordinary is happening — an accident, event, or closure —
-     rather than normal hour-to-hour variation, so it's flagged separately
-     from the routine "camera vs. history" mismatches that `fuse_labels`
-     already resolves silently by taking the worse signal.
+     camera shows at least 2 severity levels *more* traffic than the
+     historical model expects (e.g. High vs. Low). A gap that large usually
+     means something out of the ordinary is happening — an accident, event,
+     or closure. A camera *quieter* than the historical baseline is not
+     flagged: the baseline is Minnesota data, so on a quiet California road
+     that is expected.
    - **🔍 Why this prediction?** — a feature-level explanation. For Linear
      Regression this is exact: each feature's real coefficient × scaled
      value, so the contributions genuinely sum to the prediction. SVR and
@@ -196,13 +196,14 @@ flowchart TD
     G --> H["Streamlit dashboard (app.py)<br/>badge · model comparison · 24h forecast · camera map"]
 ```
 
-**Why fusion takes the max, not a blend**: the historical model and the live
-camera are independent signals with no shared ground truth to learn a
-combining weight from. An earlier multiplicative blend let a real
-gridlocked-highway test photo get reported as "Low" congestion because the
-historical baseline drowned out the live signal. Taking whichever label is
-more severe is simple, transparent, and appropriate for a warning system —
-see [Fusion design](#fusion-design-cv--historical-model) for the full story.
+**Why the badge follows the camera**: the historical model is trained on
+Minnesota traffic, so on a quiet California road in the daytime it expects far
+more traffic than is there. An earlier version took whichever label was more
+severe, and an empty road read "High" for that reason. The single-camera badge
+is now the live camera reading; the historical label is shown beside it as
+context and drives the unusual-congestion flag. (An even earlier multiplicative
+blend let a gridlocked photo read "Low", which is why the live signal must not
+be drowned out.) See [Fusion design](#fusion-design-cv--historical-model).
 
 **Why the LSTM needs special handling for live inference**: it was trained on
 24-hour sequences, so a single live snapshot in time isn't enough input on
@@ -257,11 +258,14 @@ multiplicative factor based on the live density ratio. Testing against a real
 gridlocked-highway photo exposed why that failed: the CV heuristic correctly
 read "Severe" (density ratio 0.8), but the multiplicative nudge was too weak
 to move the final label out of "Low" — the historical baseline simply
-drowned out the live signal. The fusion now reports **whichever of the two
-independent labels is more severe** — deliberately conservative, since
-under-reporting congestion that's plainly visible on camera is a worse
-failure mode than over-reporting it (`live_predict.fuse_labels`, covered by
-`tests/test_fusion.py`).
+drowned out the live signal. A second version reported **whichever of the two
+labels is more severe** (`live_predict.fuse_labels`, covered by
+`tests/test_fusion.py`). That never under-reported a jam, but the Minnesota
+baseline read "High" on quiet California daytime roads, and the badge followed
+it, so even an empty image showed "High". The single-camera tab now shows the
+**live camera reading** as the badge and uses the historical label as context
+and for the unusual-congestion flag. The route overview still uses
+`fuse_labels` for its overall reading.
 
 When a real live volume sensor reading isn't available for the lag features
 (the common case for a camera-only location), the model falls back to a
@@ -486,8 +490,7 @@ Five smaller features layered on top of the core fusion pipeline — each
 reuses signals the app already computes rather than adding a new model:
 
 - **Anomaly / incident flag** (`detect_anomaly` in `src/live_predict.py`) —
-  `fuse_labels` already resolves small camera-vs-history disagreements by
-  trusting the worse one; a *large* disagreement (2+ severity levels, e.g.
+  small camera-vs-history disagreements are ignored; a *large* disagreement (2+ severity levels, e.g.
   Low vs. High) is different in kind, not just degree — it usually means
   something happened that the historical model has no way to know about
   (an accident, an event, a closure). That gets its own warning banner

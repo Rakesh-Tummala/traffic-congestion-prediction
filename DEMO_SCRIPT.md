@@ -52,11 +52,13 @@ Point at the moving cars at the top: "They slow down when the latest reading is 
   forecast isn't pretending to be exact."
 - Open **When should I leave?** "Suggests a nearby hour with lower predicted congestion."
 
-**Fusion (the key idea)**
-- Point at the caption "Live camera reading: ... historical reading: ... final level takes whichever is
-  more severe." Say: "A warning system should never say Low when the camera shows gridlock."
-- If the **Unusual congestion detected** banner is visible, explain it: the live camera and the
-  historical model disagree sharply, which usually means an accident or event.
+**Live reading vs history (the key idea)**
+- Point at the caption "Live camera reading: ... historical reading: ..." Say: "The badge is what the camera
+  shows right now. The historical model is context: it is trained on Minnesota traffic, so on a quiet
+  California road it can expect more than is there. I found it made empty roads read High, so the badge
+  follows the camera."
+- If the **Unusual congestion detected** banner is visible, explain it: the camera shows far more traffic
+  than history expects, which can mean an accident or event.
 
 **Features to tick quickly**
 - **Use real weather here** (fills conditions from the camera's location).
@@ -118,7 +120,7 @@ Show **Click the map** (drop two points) and **Pick cameras** in 15 seconds each
 
 ## 8. Questions to expect
 
-- **Why take the more severe of the two readings?** To avoid false reassurance.
+- **Why does the badge follow the camera, not the model?** The model is a Minnesota baseline; taking the worse of the two made empty California roads read High. The camera is the ground truth for "right now".
 - **What did you train yourself?** The three prediction models. The detector is pretrained; I tuned and evaluated it.
 - **How accurate is the speed?** Honestly, rough: it is calibrated from the traffic itself, not radar.
 - **Is the challan real?** No: it is simulated and labelled as such on every card.

@@ -680,7 +680,10 @@ with mode_single:
 
             cv_label = congestion_from_density(cv_result["density_ratio"])
             model_label = calibrated_label(predictions[model_choice])
-            final_label = fuse_labels(model_label, cv_label)
+            # The badge is what the camera shows right now. The historical model is trained on
+            # Minnesota data, so on a quiet California road it often expects more traffic than
+            # exists; letting it raise the badge made empty roads read "High".
+            final_label = cv_label
             camera_name_for_log = live_cam_name or ("Uploaded image" if st.session_state.get("frame_source") == "upload"
                                                      else "Snapshot URL")
 
@@ -694,9 +697,12 @@ with mode_single:
                 st.session_state["_logged_for_frame_id"] = id(frame)
 
             congestion_badge(final_label, key=camera_name_for_log)
-            if detect_anomaly(model_label, cv_label):
-                st.warning("⚠️ **Unusual congestion detected** — the live camera reading differs sharply "
-                          f"from what history expects for this time ({cv_label} vs. an expected "
+            # Only a camera far busier than history expects suggests an incident; a camera quieter
+            # than the (Minnesota) baseline is just a quiet road.
+            if (detect_anomaly(model_label, cv_label)
+                    and CONGESTION_LEVELS.index(cv_label) > CONGESTION_LEVELS.index(model_label)):
+                st.warning("⚠️ **Unusual congestion detected** — the live camera shows much more traffic "
+                          f"than history expects for this time ({cv_label} vs. an expected "
                           f"{model_label}). This kind of mismatch often means something out of the "
                           "ordinary is happening — an accident, event, or road closure — rather than "
                           "normal hour-to-hour variation.")
@@ -715,8 +721,8 @@ with mode_single:
             m2.metric("Image density ratio", cv_result["density_ratio"])
             st.caption(f"Live camera reading: **{cv_label}**  ·  "
                        f"{MODEL_LABELS[model_choice]} historical reading: **{model_label}**  ·  "
-                       "final level takes whichever is more severe — a live camera showing gridlock "
-                       "should never be reported as low congestion just because history says this hour is normally quiet.")
+                       "the level shown is the live camera reading; the historical model is context "
+                       "(it is trained on Minnesota traffic, so it can expect more than a quiet California road has).")
 
             st.markdown("##### All three models")
             max_volume = float(congestion_bins()[-1])

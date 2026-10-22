@@ -195,7 +195,7 @@ The app asks all three for a prediction every time, then uses them in different 
 | Where in the app | Which model | How it is used |
 |---|---|---|
 | "All three models" table (Single camera) | All three | Shows each model's R2, predicted volume and level side by side. |
-| "Model driving the forecast" radio | Your choice (LSTM by default) | Sets the historical congestion label that is fused with the camera reading; draws the 24-hour forecast; powers "When should I leave?". |
+| "Model driving the forecast" radio | Your choice (LSTM by default) | Sets the historical congestion label shown beside the camera reading; draws the 24-hour forecast; powers "When should I leave?". |
 | Forecast error band | The chosen model's own error | Shaded band: LR plus or minus 334, SVR plus or minus 254, LSTM plus or minus 203 vehicles an hour. |
 | Anomaly warning | The chosen model | Compares its label with the live camera's reading. |
 | Monitoring grid and Route | LSTM (fixed) | One historical label per run, used for the overall reading. |
@@ -309,7 +309,7 @@ A predicted volume is turned into Low, Moderate, High or Severe by comparing it 
 ### Formulas
 
 ```text
-Fusion:           final level = the more severe of (historical label, live camera label)
+Single camera:    badge = live camera label; historical label shown as context (route overview takes the more severe of the two)
 MAE               = average of |predicted - actual|
 RMSE              = square root of the average of (predicted - actual)^2
 R2                = 1 - (sum of squared errors) / (total variation around the average)
@@ -349,21 +349,21 @@ Describe it as "I could not find one", not "none exists".
 
 **Congestion** is the main feature. **Speed** is an experimental extra.
 
-1. **Congestion prediction** is the heart: machine learning predicts expected traffic from time and weather, computer vision measures what the live camera shows, and the two are fused into one level (Low, Moderate, High, Severe).
+1. **Congestion prediction** is the heart: machine learning predicts expected traffic from time and weather, computer vision measures what the live camera shows, and the two are shown together (the badge follows the camera) (Low, Moderate, High, Severe).
 2. **Built on that result:** the forecast and "when should I leave", the monitoring grid, and the route map colored by congestion.
 3. **Speed and challans** (the Live e-Challan tab) are an additional, experimental part. They show what the same vision pipeline can do, but they are simulated and the speeds are not validated against radar.
 
 Do not call speed a main feature: it is the least reliable part, and the numbers you can defend (counting error, R2 of 0.977) belong to the congestion part.
 
-*Say:* "The core of the project is congestion prediction: machine learning plus computer vision, fused into one level. Everything else builds on it. I also added a speed and challan pipeline as an experimental extension, and I am open that its speeds are estimates."
+*Say:* "The core of the project is congestion prediction: machine learning plus computer vision, shown together (the badge follows the camera). Everything else builds on it. I also added a speed and challan pipeline as an experimental extension, and I am open that its speeds are estimates."
 
 ## C11. What makes this project different
 
-*Say, about 30 seconds:* "Most existing traffic systems do one of two things. Navigation apps like Google Maps use phone and sensor data that only the company has. Many student projects either predict traffic from a historical dataset, or count cars in a picture. Mine combines both on real, free, public camera feeds. It predicts what traffic should be from time and weather, checks what the camera actually shows, and takes the more severe of the two, so it never reassures when the road is jammed. I also measured the vision part on frames I labelled, and I am open about where it falls short."
+*Say, about 30 seconds:* "Most existing traffic systems do one of two things. Navigation apps like Google Maps use phone and sensor data that only the company has. Many student projects either predict traffic from a historical dataset, or count cars in a picture. Mine combines both on real, free, public camera feeds. It predicts what traffic should be from time and weather, checks what the camera actually shows, and reports the camera's reading with the prediction beside it, flagging when the camera shows far more traffic than expected. I also measured the vision part on frames I labelled, and I am open about where it falls short."
 
 Three points to back it up:
 
-1. **It fuses two signals, and I can say why.** A weighted average I tried first failed on a gridlocked image, so I changed it.
+1. **It combines two signals, and I can say why.** A weighted average failed on a gridlocked image; taking the worse of the two made empty California roads read High; so the badge now follows the camera and history is context.
 2. **It works on real, messy live data.** It found real failures (about 1 in 5 cameras serves an "unavailable" image, which the first version read as an empty road) and fixed them.
 3. **It measures itself and goes further.** An evaluation on 162 labelled frames, ideas I tried and rejected, and then routes, live tracking, speed estimates and a simulated challan pipeline, with the limits stated.
 
