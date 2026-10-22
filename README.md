@@ -153,7 +153,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (133 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (136 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -649,7 +649,7 @@ challans are issued. The math itself is unit-tested against synthetic cars of kn
 On the live cameras tried, the raw model often needed a ~2x correction, so treat speeds as
 roughly "faster or slower than the rest of the traffic", not as exact mph. In testing, far
 vehicles read much faster than near ones in the same traffic before the distance band was
-added. Safeguards: a vehicle must stay over the limit plus a margin for 3 consecutive
+added. Speeds above 1.6 times the typical traffic speed (or above 100 mph) are treated as tracking errors and never flagged: in a busy-freeway test, half of the first 12 challans showed 97-119 mph, which was tracks jumping between cars, while the real ones clustered at 56-63 mph. Safeguards: a vehicle must stay over the limit plus a margin for 3 consecutive
 measurements, a session issues at most 12 challans, at least 3 seconds apart, and the monitor
 stops when you leave the page. Evidence pictures are held in memory only; the on-disk log has
 text fields only. The challan is a demonstration of the pipeline, never evidence of a real

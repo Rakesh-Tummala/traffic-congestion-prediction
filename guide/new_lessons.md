@@ -156,7 +156,7 @@ made-up values, the challan history, a CSV download and a clear-history button.
 
 ### Safeguards
 
-3 confirmations in a row; at most 12 challans per session, at least 3 seconds apart; no challans at all if the
+speeds far above the surrounding traffic (over 1.6 times the typical speed, or over 100 mph) are treated as tracking errors and never flagged (found in a live test: half of the first 12 challans showed 97 to 119 mph, which were tracks jumping between cars; after the fix they were 60 to 79 mph); 3 confirmations in a row; at most 12 challans per session, at least 3 seconds apart; no challans at all if the
 camera could not be calibrated; a warning if the limit is set below typical traffic speed (which would flag most
 cars).
 

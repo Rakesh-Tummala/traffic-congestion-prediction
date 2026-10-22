@@ -140,3 +140,11 @@ def test_make_model_guess_refuses_a_crop_too_small_to_tell_cars_apart_without_lo
     frame = np.zeros((200, 300, 3), dtype=np.uint8)
     out = va.guess_make_model(frame, (10, 10, 40, 30))             # 30 px wide
     assert out["make"] is None and out["model"] is None and "too small" in out["note"]
+
+
+def test_speeds_far_above_the_surrounding_traffic_are_treated_as_tracking_errors():
+    from live_monitor import MAX_PLAUSIBLE_MPH, is_plausible_speed
+    assert is_plausible_speed(62, 60) and is_plausible_speed(75, 60)           # a real speeder
+    assert not is_plausible_speed(97.6, 60) and not is_plausible_speed(119.3, 60)  # glitches seen in a live test
+    assert not is_plausible_speed(MAX_PLAUSIBLE_MPH + 1, 200)                  # the absolute cap still applies
+    assert is_plausible_speed(40, 25)                                          # slow traffic: ratio allows 40

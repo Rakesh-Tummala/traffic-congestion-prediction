@@ -262,7 +262,7 @@ def patch_guide(g: str) -> str:
     sub("The route tab lets users select multiple cameras. The final route congestion is\nthe worst segment.",
         "The route tab lets users pick cameras, search places, or click the map. It draws the real road path colored "
         "by nearby cameras (Lesson 15). The final route congestion is the worst segment.")
-    sub("67 passed", "133 passed")
+    sub("67 passed", "136 passed")
     sub("1. Historical dataset and live camera locations are not perfectly matched.",
         "1. The historical model is trained on Minneapolis-area data but the live cameras are in California.")
     sub("3. Speed estimation requires manual lane-width calibration.",

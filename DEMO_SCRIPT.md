@@ -99,7 +99,7 @@ Show **Click the map** (drop two points) and **Pick cameras** in 15 seconds each
 
 ## 6. Closing (1 minute): under the hood
 
-- "133 automated tests." (Run `python -m pytest -q` in a terminal if you want to show it.)
+- "136 automated tests." (Run `python -m pytest -q` in a terminal if you want to show it.)
 - Open `cv_eval/results/report.md`: "The evaluation behind the numbers, including the ideas I tried and
   rejected: bigger models, sliced detection, a learned classifier."
 - Open the README **Limitations and future work**. Say: "The historical model was trained on Minneapolis

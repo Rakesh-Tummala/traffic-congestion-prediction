@@ -31,7 +31,12 @@ TRACK_CONF = 0.30             # confidence for detections fed to the tracker
 CALIBRATION_SECONDS = 25.0    # stream seconds spent collecting cars for the camera fit
 MIN_TRACKS_FOR_SCALE = 12     # tracked vehicles needed before the traffic-speed scale is trusted
 SCALE_RANGE = (0.4, 2.5)      # a larger correction than this means the camera model is not usable
-MAX_PLAUSIBLE_MPH = 140.0     # faster than this is a tracking glitch, never a violation
+MAX_PLAUSIBLE_MPH = 100.0     # faster than this is a tracking glitch, never a violation
+# A car cannot move far faster than the traffic around it. In a live test on a busy freeway, half the
+# challans (97-119 mph) came from tracks that jumped between cars, while real ones clustered at 56-63 mph
+# against typical traffic of 60. Speeds above this multiple of the typical traffic speed are treated as
+# tracking errors: shown without a speed and never flagged.
+MAX_SPEED_RATIO = 1.6
 # Pixel noise in a far vehicle's position is magnified into a big speed error (a 3 px wobble is
 # about a metre at 100 m), and very near vehicles leave the frame quickly. Live testing showed
 # far cars reading far faster than near ones in the same traffic, so speeds and challans are
@@ -47,6 +52,12 @@ GREEN, ORANGE, RED, GRAY = (0, 200, 0), (0, 165, 255), (0, 0, 255), (160, 160, 1
 
 def violation_threshold(limit_mph: float, margin_mph: float) -> float:
     return limit_mph + margin_mph
+
+
+def is_plausible_speed(mph: float, reference_mph: float) -> bool:
+    """False for a speed that is almost certainly a tracking error: above the absolute cap, or far above
+    the typical traffic speed that the camera's speeds were scaled to."""
+    return mph <= MAX_PLAUSIBLE_MPH and mph <= MAX_SPEED_RATIO * reference_mph
 
 
 def speed_scale(raw_speeds: list[float], reference_mph: float, min_tracks: int = MIN_TRACKS_FOR_SCALE):
@@ -195,10 +206,11 @@ class LiveMonitor:
                     label, color = trk.cls_name, GRAY
                     if scale is not None and trk.track_id in raw_speed:
                         mph = raw_speed[trk.track_id] * scale
-                        label = f"{trk.cls_name} {mph:.0f} mph"
+                        plausible = is_plausible_speed(mph, self.reference_mph)
+                        label = f"{trk.cls_name} {mph:.0f} mph" if plausible else trk.cls_name
                         over = mph - self.limit_mph
-                        color = RED if over >= self.margin_mph else ORANGE if over > 0 else GREEN
-                        if mph >= violation_threshold(self.limit_mph, self.margin_mph) and mph <= MAX_PLAUSIBLE_MPH \
+                        color = (RED if over >= self.margin_mph else ORANGE if over > 0 else GREEN) if plausible else GRAY
+                        if plausible and mph >= violation_threshold(self.limit_mph, self.margin_mph) \
                                 and not trk.flagged and len(trk.history) >= 5:
                             consecutive[trk.track_id] = consecutive.get(trk.track_id, 0) + 1
                             if consecutive[trk.track_id] >= CONFIRMATIONS:  # several in a row, not one noisy one
