@@ -36,7 +36,7 @@ all wrapped in a Streamlit dashboard.
    defaults if you just want a quick look, or use the real-weather button above.
 4. **Pick which model drives the forecast** — LSTM (most accurate, R²=0.977),
    SVR, or Linear Regression. All three run regardless; this just picks which
-   one's label feeds the final fused result and the forecast chart.
+   one's label is shown beside the live reading and drives the forecast chart.
 5. *(Optional)* **Advanced panel** — if the camera's location has a real
    traffic volume sensor, enter its 1h/3h/24h-ago readings for a more accurate
    prediction than the default seasonal-average fallback.
@@ -114,11 +114,9 @@ same result: an overall reading, a route map, and a segment-by-segment list.
   destination (a third click starts over); same route + camera discovery.
 
 Each segment shows that camera's own live reading; the overall route reading
-is the worst live segment fused (max severity, as `fuse_labels` does for one
-camera) with the historical model's label, so a single jammed stretch is never
-hidden by an otherwise-clear route. The historical label is one shared
-prediction for the whole route, so it is applied once to the overall reading
-rather than to every segment (which would floor them all at it). The
+is the worst live segment, so a single jammed stretch is never hidden by an
+otherwise-clear route. The historical label is shown beside it as context only
+(it is a Minnesota baseline and would floor quiet California routes at High). The
 Monitoring grid likewise badges each camera by its live reading and shows the
 historical label once as a caption. The
 **route map** draws the real road path (OSRM, OpenStreetMap routing, free, no
@@ -189,7 +187,7 @@ flowchart TD
         E1 --> E2["Vehicle count + density ratio"]
         E2 --> F1["Density → congestion heuristic"]
         D1 --> F2["Historical model prediction<br/>(seasonal fallback for lag features<br/>if no real sensor reading given)"]
-        F1 --> G["Fusion: report the MORE SEVERE<br/>of the two signals<br/>(fuse_labels)"]
+        F1 --> G["Badge = live camera reading;<br/>historical label shown as context<br/>(unusual-congestion flag)"]
         F2 --> G
     end
 
@@ -264,8 +262,8 @@ labels is more severe** (`live_predict.fuse_labels`, covered by
 baseline read "High" on quiet California daytime roads, and the badge followed
 it, so even an empty image showed "High". The single-camera tab now shows the
 **live camera reading** as the badge and uses the historical label as context
-and for the unusual-congestion flag. The route overview still uses
-`fuse_labels` for its overall reading.
+and for the unusual-congestion flag. The route overview and the grid follow the
+live readings the same way. `fuse_labels` remains in `live_predict.py`, tested.
 
 When a real live volume sensor reading isn't available for the lag features
 (the common case for a camera-only location), the model falls back to a
@@ -518,9 +516,8 @@ reuses signals the app already computes rather than adding a new model:
   the user: given a planned departure hour and a flexibility window, it
   checks nearby hours and suggests one with lower predicted congestion, if
   one exists. No new model — just a different read of an existing forecast.
-- **🛣️ Route tab** — combine 2+ cameras into one reading using the same
-  max-severity idea `fuse_labels` uses for a single camera, extended across
-  several: the overall route congestion is always the worst segment, with a
+- **🛣️ Route tab** — combine 2+ cameras into one reading by
+  max-severity across the cameras: the overall route congestion is always the worst segment, with a
   per-camera breakdown showing which one is driving that result. Routes can be
   built from picked cameras, searched places, or two map clicks.
 

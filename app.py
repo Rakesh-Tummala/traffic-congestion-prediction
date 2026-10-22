@@ -33,7 +33,7 @@ from data_loader import WEATHER_CODES  # noqa: E402
 from live_cameras import DISTRICTS, fetch_cameras  # noqa: E402
 from live_predict import (  # noqa: E402
     CONGESTION_LEVELS, MODELS_DIR, build_feature_row, calibrated_label, congestion_bins,
-    detect_anomaly, forecast_day, fuse_labels, predict_all_models, recommend_departure,
+    detect_anomaly, forecast_day, predict_all_models, recommend_departure,
 )
 from speed_estimation import US_LANE_WIDTH_M, annotate_speeds, check_speeds  # noqa: E402
 from echallan import (  # noqa: E402
@@ -1045,7 +1045,7 @@ with mode_grid:
                 if grid_hist:
                     st.caption(f"Each badge is that camera's own live reading (vehicle density). The historical "
                                f"model for this time and weather says **{grid_hist}** for every camera; the "
-                               "Single camera tab shows it fused with the live reading.")
+                               "Single camera tab shows it next to the live reading.")
                 severity_counts = pd.Series(
                     [r["final_label"] for r in grid_results if r["final_label"]]
                 ).value_counts().reindex(CONGESTION_LEVELS, fill_value=0)
@@ -1134,14 +1134,14 @@ def _show_route_view():
         live_worst = max((r["final_label"] for r in valid), key=CONGESTION_LEVELS.index)
         worst_segment = next(r for r in valid if r["final_label"] == live_worst)
         hist_label = view.get("hist_label")
-        route_label = fuse_labels(hist_label, live_worst) if hist_label else live_worst
+        route_label = live_worst  # the cameras' live readings; history is shown as context only
         st.markdown("###### Overall route congestion")
         congestion_badge(route_label)
         if hist_label:
             st.caption(f"Worst live camera: **{live_worst}** ({worst_segment['camera']['name']}). "
                        f"Historical model for this time and weather: **{hist_label}**. "
-                       "The overall reading is the more severe of the two; the segments below show "
-                       "each camera's own live reading.")
+                       "The overall reading is the worst live camera; history is a Minnesota-trained "
+                       "baseline, shown for context only.")
         else:
             st.caption(f"Driven by the worst segment: **{worst_segment['camera']['name']}**")
     elif results:

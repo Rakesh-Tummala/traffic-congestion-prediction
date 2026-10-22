@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
+from camera_time import camera_now
 from cv_module import DEFAULT_CONF, VEHICLE_CLASS_IDS, congestion_from_density
 from echallan import append_to_log, generate_challan
 from vehicle_tracking import CalibrationFitter, CentroidTracker, estimate_speed_mph
@@ -248,7 +249,7 @@ class LiveMonitor:
         h, w = frame.shape[:2]
         pad_x, pad_y = int(0.15 * (x2 - x1)), int(0.15 * (y2 - y1))
         crop = frame[max(0, y1 - pad_y):min(h, y2 + pad_y), max(0, x1 - pad_x):min(w, x2 + pad_x)].copy()
-        event = {"time": time.strftime("%H:%M:%S"), "cls_name": trk.cls_name, "speed_mph": mph,
+        event = {"time": camera_now().strftime("%H:%M:%S"), "cls_name": trk.cls_name, "speed_mph": mph,
                  "crop": crop, "challan": None, "plate": None, "attrs": None, "status": "processing"}
         with self._lock:
             self.state["events"].append(event)

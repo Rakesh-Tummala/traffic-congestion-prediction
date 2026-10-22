@@ -309,7 +309,7 @@ A predicted volume is turned into Low, Moderate, High or Severe by comparing it 
 ### Formulas
 
 ```text
-Single camera:    badge = live camera label; historical label shown as context (route overview takes the more severe of the two)
+Single camera:    badge = live camera label; historical label shown as context (route overview = worst live camera)
 MAE               = average of |predicted - actual|
 RMSE              = square root of the average of (predicted - actual)^2
 R2                = 1 - (sum of squared errors) / (total variation around the average)
