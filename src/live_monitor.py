@@ -24,8 +24,9 @@ import numpy as np
 
 from camera_time import camera_now
 from cv_module import DEFAULT_CONF, VEHICLE_CLASS_IDS, congestion_from_density
-from echallan import append_to_log, generate_challan
+from echallan import append_to_log, generate_challan, generate_violation_challan
 from vehicle_tracking import CalibrationFitter, CentroidTracker, estimate_speed_mph
+from violations import ViolationDetector
 
 SAMPLE_EVERY = 4              # process every 4th frame (15 fps stream -> ~3.75 Hz)
 TRACK_CONF = 0.30             # confidence for detections fed to the tracker
@@ -48,7 +49,8 @@ MAX_EVENTS = 12               # a session never issues more than this many chall
 MIN_EVENT_GAP_S = 3.0         # stream seconds between challans (a tracker glitch can't machine-gun them)
 IDLE_STOP_SECONDS = 45.0      # stop if the page stops polling (user closed it)
 
-GREEN, ORANGE, RED, GRAY = (0, 200, 0), (0, 165, 255), (0, 0, 255), (160, 160, 160)
+GREEN, ORANGE, RED, GRAY, MAGENTA = (0, 200, 0), (0, 165, 255), (0, 0, 255), (160, 160, 160), (255, 0, 255)
+FLAG_SHOW_SECONDS = 4.0       # how long a flagged vehicle keeps its violation label on the video
 
 
 def violation_threshold(limit_mph: float, margin_mph: float) -> float:
@@ -76,8 +78,12 @@ def speed_scale(raw_speeds: list[float], reference_mph: float, min_tracks: int =
 class LiveMonitor:
     def __init__(self, stream_url: str, camera_name: str, limit_mph: float = 65.0, margin_mph: float = 15.0,
                  reference_mph: float = 60.0, run_seconds: float = 120.0, read_plates: bool = False,
-                 identify: bool = False, weights: str = "yolov8s.pt", limit_source: str = ""):
+                 identify: bool = False, weights: str = "yolov8s.pt", limit_source: str = "",
+                 detect_violations: bool = True, max_events: int = MAX_EVENTS, min_event_gap_s: float = MIN_EVENT_GAP_S,
+                 log_challans: bool = True):
         self.stream_url, self.camera_name, self.limit_source = stream_url, camera_name, limit_source
+        self.detect_violations = detect_violations
+        self.max_events, self.min_event_gap_s, self.log_challans = max_events, min_event_gap_s, log_challans
         self.limit_mph, self.margin_mph, self.reference_mph = limit_mph, margin_mph, reference_mph
         self.run_seconds, self.read_plates, self.identify, self.weights = run_seconds, read_plates, identify, weights
         self._lock = threading.Lock()
@@ -88,7 +94,8 @@ class LiveMonitor:
         self._started_at = 0.0
         self.state = {"status": "idle", "message": "", "frame": None, "vehicle_count": 0, "density": 0.0,
                       "congestion": None, "speed_status": "waiting", "events": [], "tracks_with_speed": 0,
-                      "scale": None, "calibration": None, "elapsed": 0.0, "fps": 0.0}
+                      "scale": None, "calibration": None, "elapsed": 0.0, "fps": 0.0,
+                      "raw_speed_median": None}
 
     # ------------------------------------------------------------------ control
     def start(self) -> None:
@@ -140,6 +147,7 @@ class LiveMonitor:
             raw_speed: dict[int, float] = {}
             consecutive: dict[int, int] = {}
             n, t_first, last_wall, density_hist, last_event_t = 0, None, time.time(), [], -1e9
+            viol, flag_labels = None, {}
             self._set(status="calibrating", message="Watching traffic to calibrate the camera view...")
 
             while not self._should_stop():
@@ -158,6 +166,7 @@ class LiveMonitor:
                 h, w = frame.shape[:2]
                 if fitter is None:
                     fitter = CalibrationFitter(w, h)
+                    viol = ViolationDetector(w, h, CALIBRATION_SECONDS)
 
                 res = model.predict(frame, conf=DEFAULT_CONF, imgsz=640, classes=list(VEHICLE_CLASS_IDS),
                                     verbose=False)[0]
@@ -201,6 +210,27 @@ class LiveMonitor:
                     elif scale is None:
                         speed_status = "unreliable"
 
+                # --- other violation types (wrong way, stopped, tailgating, unsafe lane change)
+                if viol is not None and self.detect_violations:
+                    ground = {}
+                    if calib is not None:
+                        for trk in tracked:
+                            g = calib.to_ground((trk.last_box[0] + trk.last_box[2]) / 2, trk.last_box[3])
+                            if g is not None and RANGE_BAND_M[0] <= g[1] <= RANGE_BAND_M[1]:
+                                ground[trk.track_id] = (g[0], g[1], raw_speed.get(trk.track_id))
+                    by_id = {trk.track_id: trk for trk in tracked}
+                    for ev in viol.update(t, tracked, ground, scale):
+                        trk = by_id.get(ev.track_id)
+                        if trk is None:
+                            continue
+                        flag_labels[ev.track_id] = (ev.kind.replace("_", " "), t + FLAG_SHOW_SECONDS)
+                        if len(self.state["events"]) < self.max_events and t - last_event_t >= self.min_event_gap_s:
+                            last_event_t = t
+                            self._issue_violation(frame, trk, ev)
+                        elif len(self.state["events"]) >= self.max_events and not self.state["message"]:
+                            self._set(message=f"Reached the limit of {self.max_events} challans for this session; "
+                                              "detection continues but no more are issued.")
+
                 annotated = frame.copy()
                 for trk in tracked:
                     x1, y1, x2, y2 = (int(v) for v in trk.last_box)
@@ -216,14 +246,17 @@ class LiveMonitor:
                             consecutive[trk.track_id] = consecutive.get(trk.track_id, 0) + 1
                             if consecutive[trk.track_id] >= CONFIRMATIONS:  # several in a row, not one noisy one
                                 trk.flagged = True
-                                if len(self.state["events"]) < MAX_EVENTS and t - last_event_t >= MIN_EVENT_GAP_S:
+                                if len(self.state["events"]) < self.max_events and t - last_event_t >= self.min_event_gap_s:
                                     last_event_t = t
                                     self._issue(frame, trk, mph)
-                                elif len(self.state["events"]) >= MAX_EVENTS and not self.state["message"]:
-                                    self._set(message=f"Reached the limit of {MAX_EVENTS} challans for this session; "
+                                elif len(self.state["events"]) >= self.max_events and not self.state["message"]:
+                                    self._set(message=f"Reached the limit of {self.max_events} challans for this session; "
                                                       "detection continues but no more are issued.")
                         else:
                             consecutive[trk.track_id] = 0
+                    fl = flag_labels.get(trk.track_id)
+                    if fl and t <= fl[1]:
+                        label, color = f"{trk.cls_name}: {fl[0]}", MAGENTA
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
                     cv2.putText(annotated, label, (x1, max(14, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
@@ -232,6 +265,7 @@ class LiveMonitor:
                 self._set(frame=annotated, vehicle_count=len(dets), density=round(density, 4),
                           congestion=congestion_from_density(density), speed_status=speed_status,
                           tracks_with_speed=len(raw_speed), scale=scale,
+                          raw_speed_median=(float(np.median(list(raw_speed.values()))) if raw_speed else None),
                           fps=1.0 / max(1e-3, now - last_wall))
                 last_wall = now
             self._set(status="stopped", message="Monitoring finished.")
@@ -255,7 +289,20 @@ class LiveMonitor:
             self.state["events"].append(event)
         self._pool.submit(self._finalize_event, event, frame.copy(), trk.last_box, trk.cls_name, mph)
 
-    def _finalize_event(self, event: dict, frame: np.ndarray, box: tuple, cls_name: str, mph: float) -> None:
+    def _issue_violation(self, frame: np.ndarray, trk, ev) -> None:
+        """Queue a challan for a non-speeding violation (same evidence handling as `_issue`)."""
+        x1, y1, x2, y2 = (int(v) for v in trk.last_box)
+        h, w = frame.shape[:2]
+        pad_x, pad_y = int(0.15 * (x2 - x1)), int(0.15 * (y2 - y1))
+        crop = frame[max(0, y1 - pad_y):min(h, y2 + pad_y), max(0, x1 - pad_x):min(w, x2 + pad_x)].copy()
+        event = {"time": camera_now().strftime("%H:%M:%S"), "cls_name": trk.cls_name, "speed_mph": None,
+                 "violation": ev.kind, "detail": ev.detail, "confidence": ev.confidence,
+                 "crop": crop, "challan": None, "plate": None, "attrs": None, "status": "processing"}
+        with self._lock:
+            self.state["events"].append(event)
+        self._pool.submit(self._finalize_event, event, frame.copy(), trk.last_box, trk.cls_name, None)
+
+    def _finalize_event(self, event: dict, frame: np.ndarray, box: tuple, cls_name: str, mph: float | None) -> None:
         try:
             plate_text, plate_conf, desc = "", 0.0, ""
             if self.read_plates:
@@ -277,12 +324,19 @@ class LiveMonitor:
                     elif mm["make"]:
                         desc += f", possibly a {mm['make']} ({mm['make_confidence']:.0%} confidence)"
                 desc = f"{desc} (best guess)" if desc else ""
-            challan = generate_challan(
-                {"speeding": True, "cls_name": cls_name, "speed_mph": mph, "over_mph": mph - self.limit_mph},
-                self.camera_name, self.limit_mph, vehicle_number=plate_text,
-                plate_auto_detected=bool(plate_text), plate_confidence=plate_conf,
-                vehicle_description=desc, source="live monitor", limit_source=self.limit_source)
-            append_to_log(challan)
+            if event.get("violation"):
+                challan = generate_violation_challan(
+                    event["violation"], event["detail"], event["confidence"], cls_name, self.camera_name,
+                    vehicle_number=plate_text, plate_auto_detected=bool(plate_text), plate_confidence=plate_conf,
+                    vehicle_description=desc)
+            else:
+                challan = generate_challan(
+                    {"speeding": True, "cls_name": cls_name, "speed_mph": mph, "over_mph": mph - self.limit_mph},
+                    self.camera_name, self.limit_mph, vehicle_number=plate_text,
+                    plate_auto_detected=bool(plate_text), plate_confidence=plate_conf,
+                    vehicle_description=desc, source="live monitor", limit_source=self.limit_source)
+            if self.log_challans:
+                append_to_log(challan)
             event["challan"] = challan
             event["status"] = "done"
         except Exception as e:

@@ -17,7 +17,7 @@ from data_loader import FEATURE_COLUMNS, WEATHER_CODES, load_dataset
 from train_dl import SEQ_LEN, TrafficLSTM
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
-REGRESSION_MODELS = ["linear_regression", "svr"]
+REGRESSION_MODELS = ["linear_regression", "svr", "gradient_boosting"]
 ALL_MODELS = REGRESSION_MODELS + ["lstm"]
 
 

@@ -3,6 +3,7 @@ import os
 
 import joblib
 import numpy as np
+from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
@@ -49,12 +50,21 @@ def main():
     svr_pred = svr.predict(X_test_s)
     svr_metrics = evaluate("SVR (rbf)", y_test, svr_pred)
 
+    # Gradient-boosted trees: added after the baseline study (research/baselines.py) showed they beat LR, SVR
+    # and the LSTM on this data. Trees do not need scaling, but the shared prediction path applies the scaler, which
+    # is harmless to them.
+    gb = HistGradientBoostingRegressor(max_iter=300, learning_rate=0.08, random_state=42)
+    gb.fit(X_train_s, y_train)
+    gb_pred = gb.predict(X_test_s)
+    gb_metrics = evaluate("GradientBoosting", y_test, gb_pred)
+
     joblib.dump({"model": lr, "scaler": scaler, "features": FEATURE_COLUMNS}, os.path.join(MODELS_DIR, "linear_regression.joblib"))
+    joblib.dump({"model": gb, "scaler": scaler, "features": FEATURE_COLUMNS}, os.path.join(MODELS_DIR, "gradient_boosting.joblib"))
     joblib.dump({"model": svr, "scaler": scaler, "features": FEATURE_COLUMNS}, os.path.join(MODELS_DIR, "svr.joblib"))
     joblib.dump(seasonal_profile(train), os.path.join(MODELS_DIR, "seasonal_profile.joblib"))
     print(f"\nSaved models to {MODELS_DIR}")
 
-    return {"linear_regression": lr_metrics, "svr": svr_metrics}
+    return {"linear_regression": lr_metrics, "svr": svr_metrics, "gradient_boosting": gb_metrics}
 
 
 if __name__ == "__main__":

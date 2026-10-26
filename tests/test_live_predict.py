@@ -13,7 +13,7 @@ from live_predict import ALL_MODELS, build_feature_row, predict_all_models  # no
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
 MODELS_MISSING = not all(
     os.path.exists(os.path.join(MODELS_DIR, f))
-    for f in ("linear_regression.joblib", "svr.joblib", "lstm.pt", "lstm_scalers.joblib", "seasonal_profile.joblib")
+    for f in ("linear_regression.joblib", "svr.joblib", "gradient_boosting.joblib", "lstm.pt", "lstm_scalers.joblib", "seasonal_profile.joblib")
 )
 
 

@@ -1,11 +1,12 @@
 """Streamlit dashboard: pick a real live Caltrans camera (click the map or use
 the dropdown — they stay in sync), upload an image, or paste a snapshot URL;
 set conditions; get vehicle detection plus a fused congestion prediction from
-all three trained models, with an anomaly flag, a feature-level explanation,
+all trained models, with an anomaly flag, a feature-level explanation,
 a per-camera history trend, and a "when should I leave" recommendation. Also
 includes a monitoring grid to check several cameras at once, and a route tab
 to combine several cameras into one worst-segment-wins reading. Run with:
 streamlit run app.py"""
+import json
 import os
 import sys
 import time
@@ -56,16 +57,41 @@ from route_map import (  # noqa: E402
 
 LEVEL_COLORS = {"Low": "#22c55e", "Moderate": "#eab308", "High": "#f97316", "Severe": "#ef4444"}
 LEVEL_COLORS_RGB = {"Low": [34, 197, 94], "Moderate": [234, 179, 8], "High": [249, 115, 22], "Severe": [239, 68, 68]}
-MODEL_LABELS = {"linear_regression": "Linear Regression", "svr": "SVR", "lstm": "LSTM"}
-MODEL_R2 = {"linear_regression": 0.948, "svr": 0.960, "lstm": 0.977}
+MODEL_LABELS = {"linear_regression": "Linear Regression", "svr": "SVR", "gradient_boosting": "Gradient Boosting", "lstm": "LSTM"}
+MODEL_R2 = {"linear_regression": 0.948, "svr": 0.960, "gradient_boosting": 0.988, "lstm": 0.977}
 # Held-out test-set MAE (mean absolute error, in vehicles/hour) for each trained
 # model — computed once from the saved model artifacts, used only to draw an
 # honest "predicted ± typical error" band on the forecast chart rather than
 # implying false precision with a single confident line.
-MODEL_MAE = {"linear_regression": 334.2, "svr": 253.5, "lstm": 202.6}
+MODEL_MAE = {"linear_regression": 334.2, "svr": 253.5, "gradient_boosting": 143.9, "lstm": 202.6}
+
+
+def _load_intervals() -> dict:
+    """Split-conformal half-widths written by research/conformal_intervals.py (empty if not generated)."""
+    try:
+        with open(os.path.join(MODELS_DIR, "conformal_intervals.json"), encoding="utf-8") as f:
+            return json.load(f).get("intervals", {})
+    except (OSError, ValueError):
+        return {}
+
+
+CONFORMAL = _load_intervals()
+
+
+def forecast_band(model_key: str) -> tuple[float, str]:
+    """(half-width, caption) for the forecast chart: the 80% conformal interval when available,
+    otherwise the model's typical (mean absolute) error."""
+    iv = CONFORMAL.get(model_key, {}).get("80")
+    if iv:
+        return iv["half_width"], (f"shaded band is an 80% prediction interval (±{iv['half_width']:.0f} vehicles/hour, "
+                                  f"from validation errors; {iv['test_coverage']:.0%} of later held-out hours fell inside it)")
+    return MODEL_MAE[model_key], (f"shaded band shows ±{MODEL_MAE[model_key]:.0f} vehicles/hour, this model's "
+                                  "typical error on held-out test data")
+
+
 MODELS_READY = all(
     os.path.exists(os.path.join(MODELS_DIR, f))
-    for f in ("linear_regression.joblib", "svr.joblib", "lstm.pt", "lstm_scalers.joblib", "seasonal_profile.joblib")
+    for f in ("linear_regression.joblib", "svr.joblib", "gradient_boosting.joblib", "lstm.pt", "lstm_scalers.joblib", "seasonal_profile.joblib")
 )
 
 
@@ -425,7 +451,7 @@ st.set_page_config(page_title="Smart Traffic Congestion Prediction", layout="wid
 st.markdown(theme_css(), unsafe_allow_html=True)
 st.markdown(
     header_html("Smart Traffic Congestion Prediction",
-                "Computer vision vehicle counting + Linear Regression / SVR / LSTM, fused with real live "
+                "Computer vision vehicle counting + Linear Regression / SVR / Gradient Boosting / LSTM, alongside real live "
                 "traffic cameras. The cars above slow down when the latest reading is congested.",
                 st.session_state.get("_last_level")),
     unsafe_allow_html=True,
@@ -640,7 +666,7 @@ with mode_single:
             is_holiday = st.checkbox("Holiday")
 
         model_choice = st.radio(
-            "Model driving the forecast", ["lstm", "svr", "linear_regression"], horizontal=True,
+            "Model driving the forecast", ["gradient_boosting", "lstm", "svr", "linear_regression"], horizontal=True,
             format_func=lambda m: f"{MODEL_LABELS[m]} (R²={MODEL_R2[m]})",
         )
 
@@ -724,12 +750,12 @@ with mode_single:
                        "the level shown is the live camera reading; the historical model is context "
                        "(it is trained on Minnesota traffic, so it can expect more than a quiet California road has).")
 
-            st.markdown("##### All three models")
+            st.markdown("##### All models")
             max_volume = float(congestion_bins()[-1])
             comparison_df = pd.DataFrame([
                 {"Model": MODEL_LABELS[name], "R²": MODEL_R2[name], "Predicted volume": round(predictions[name]),
                  "Level": calibrated_label(predictions[name])}
-                for name in ("linear_regression", "svr", "lstm")
+                for name in ("linear_regression", "svr", "gradient_boosting", "lstm")
             ])
             st.dataframe(
                 comparison_df, hide_index=True, use_container_width=True,
@@ -782,12 +808,12 @@ with mode_single:
             st.markdown("##### Today's forecast")
             forecast_df = _cached_forecast(now.strftime("%Y-%m-%d"), temp_c, rain_1h, snow_1h,
                                             clouds_all, int(is_holiday), weather_main, model_choice)
-            st.altair_chart(forecast_chart(forecast_df, now.hour, congestion_bins(), mae=MODEL_MAE[model_choice]),
+            band, band_caption = forecast_band(model_choice)
+            st.altair_chart(forecast_chart(forecast_df, now.hour, congestion_bins(), mae=band),
                              use_container_width=True)
             st.caption(f"Predicted volume across today using {MODEL_LABELS[model_choice]}, "
                        "weather held at the conditions set above. White dot marks the current hour; "
-                       f"shaded band shows ±{MODEL_MAE[model_choice]:.0f} vehicles/hour, this model's "
-                       "typical error on held-out test data.")
+                       f"{band_caption}.")
 
             with st.expander("🕒 When should I leave?"):
                 st.caption("Uses today's forecast above to suggest a nearby hour with lower predicted "
@@ -1014,7 +1040,7 @@ with mode_grid:
                 now = camera_now()
                 try:
                     model_pred = predict_all_models(now, g_temp, g_rain, 0.0, g_clouds, 0, g_weather)
-                    hist_label = calibrated_label(model_pred["lstm"])
+                    hist_label = calibrated_label(model_pred["gradient_boosting"])
                 except Exception as e:
                     st.error(f"Historical model prediction failed: {e}")
                     hist_label = None
@@ -1082,7 +1108,7 @@ def _run_route_check(cams, weather, route=None, endpoints=None, in_route_order=F
     temp, rain, clouds, weather_main = weather
     try:
         model_pred = predict_all_models(camera_now(), temp, rain, 0.0, clouds, 0, weather_main)
-        hist_label = calibrated_label(model_pred["lstm"])
+        hist_label = calibrated_label(model_pred["gradient_boosting"])
     except Exception as e:
         st.error(f"Historical model prediction failed: {e}")
         hist_label = None
@@ -1379,8 +1405,10 @@ def _render_live_monitor():
                    "measurements before a challan is generated.")
     for ev in reversed(events):
         ec1, ec2 = st.columns([1, 2])
-        ec1.image(cv2.cvtColor(ev["crop"], cv2.COLOR_BGR2RGB), caption=f"{ev['cls_name']} at {ev['time']}, "
-                  f"~{ev['speed_mph']:.0f} mph", use_container_width=True)
+        what = (f"~{ev['speed_mph']:.0f} mph" if ev.get("speed_mph") is not None
+                else ev.get("violation", "violation").replace("_", " "))
+        ec1.image(cv2.cvtColor(ev["crop"], cv2.COLOR_BGR2RGB), caption=f"{ev['cls_name']} at {ev['time']}, {what}",
+                  use_container_width=True)
         if ev["challan"] is not None:
             ec2.markdown(render_challan_html(ev["challan"]), unsafe_allow_html=True)
         else:
@@ -1403,6 +1431,11 @@ with mode_live:
             "calibration). The camera's zoom is unknown, so speeds are also scaled so the median vehicle matches "
             "the *typical traffic speed* you set below. Speeds are only estimated for vehicles in a reliable "
             "distance band, and if the camera model is not convincing, speeds and challans are switched off.\n"
+            "- **Other violations** are flagged by rules on the same tracks: *wrong way* (moving against the flow "
+            "learned from the traffic, cell by cell), *stopped vehicle* (stationary for 6 s while others move), "
+            "*tailgating* (time headway under 0.6 s) and *unsafe lane change* (weaving or a tight cut-in). Wrong-way "
+            "and stopped-vehicle are rule-based and need no speed calibration; the last two are **experimental**. "
+            "Turn signals cannot be seen at this camera resolution, so indicator violations are not detected.\n"
             "- **Treat speeds as rough estimates** (easily 20-30% off, and not validated against radar). "
             "A challan here is a demonstration of the pipeline, never evidence of a real violation.\n"
             "- A challan is generated automatically from the real vehicle observed: its type, estimated speed, "
@@ -1467,6 +1500,8 @@ with mode_live:
         lo1, lo2 = st.columns(2)
         lm_plates = lo1.checkbox("Try to read license plates (slow; plates are rarely legible)", key="live_plates")
         lm_ident = lo2.checkbox("Identify color and type (slow; first run downloads a model)", key="live_ident")
+        lm_viol = st.checkbox("Also flag other violations: wrong-way, stopped vehicle, tailgating, unsafe lane change "
+                              "(the last two are experimental)", value=True, key="live_violations")
 
         lm_caption, lm_limit_source = _limit_caption(lm_info, lm_limit) if lm_auto else ("", "entered manually")
         if lm_caption:
@@ -1483,7 +1518,7 @@ with mode_live:
             new_mon = LiveMonitor(lm_cam["stream_url"], f"{lm_cam['name']} ({lm_cam['nearby_place']})",
                                   limit_mph=lm_limit, margin_mph=lm_margin, reference_mph=lm_ref,
                                   run_seconds=float(lm_secs), read_plates=lm_plates, identify=lm_ident,
-                                  limit_source=lm_limit_source)
+                                  limit_source=lm_limit_source, detect_violations=lm_viol)
             new_mon.start()
             st.session_state["live_monitor"] = new_mon
             st.session_state.pop("_live_final_rerun", None)
@@ -1537,8 +1572,8 @@ with mode_challan:
     st.markdown(f"###### Challan history ({len(history)} generated on this install)")
     if history:
         history_df = pd.DataFrame(history).reindex(columns=[
-            "challan_id", "issued_at", "source", "camera_name", "vehicle_class", "vehicle_description",
-            "vehicle_number", "plate_auto_detected", "speed_mph", "fine_inr"])
+            "challan_id", "issued_at", "source", "violation_type", "violation_detail", "camera_name",
+            "vehicle_class", "vehicle_description", "vehicle_number", "plate_auto_detected", "speed_mph", "fine_inr"])
         st.dataframe(history_df, hide_index=True, use_container_width=True)
         st.download_button("⬇️ Download history (CSV)", history_df.to_csv(index=False).encode("utf-8"),
                            file_name="challan_history.csv", mime="text/csv")

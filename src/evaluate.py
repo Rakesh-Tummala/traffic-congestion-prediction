@@ -23,6 +23,7 @@ def main():
     all_metrics = {
         "Linear Regression": reg_metrics["linear_regression"],
         "SVR": reg_metrics["svr"],
+        "Gradient Boosting": reg_metrics["gradient_boosting"],
         "LSTM": lstm_metrics,
     }
 
@@ -34,11 +35,11 @@ def main():
 
     names = list(all_metrics.keys())
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
-    axes[0].bar(names, [all_metrics[n]["rmse"] for n in names], color=["#4C72B0", "#DD8452", "#55A868"])
+    axes[0].bar(names, [all_metrics[n]["rmse"] for n in names], color=["#4C72B0", "#DD8452", "#C44E52", "#55A868"])
     axes[0].set_title("RMSE (lower is better)")
     axes[0].tick_params(axis="x", rotation=15)
 
-    axes[1].bar(names, [all_metrics[n]["r2"] for n in names], color=["#4C72B0", "#DD8452", "#55A868"])
+    axes[1].bar(names, [all_metrics[n]["r2"] for n in names], color=["#4C72B0", "#DD8452", "#C44E52", "#55A868"])
     axes[1].set_title("R² (higher is better)")
     axes[1].tick_params(axis="x", rotation=15)
 

@@ -40,6 +40,20 @@ FINE_SCHEDULE_INR = {
     "truck": {"base": 2000, "aggravated": 4000},
 }
 AGGRAVATED_OVER_MPH = 20.0
+
+# Other violation types the live monitor can flag (see violations.py). The amounts and legal wording are
+# ILLUSTRATIVE placeholders for the demo, not statements of law: check the real provisions before quoting them.
+VIOLATION_INFO = {
+    "speeding": {"title": "Speed Violation Summary", "label": "Over-speeding", "fine": None},
+    "wrong_way": {"title": "Wrong-Way Driving Summary", "label": "Driving against the flow of traffic",
+                  "fine": 5000, "law": "Motor Vehicles Act, 1988 (as amended 2019): dangerous-driving provisions (illustrative)"},
+    "stopped_vehicle": {"title": "Stopped Vehicle Summary", "label": "Stopped in a live traffic lane",
+                        "fine": 1000, "law": "Motor Vehicles Act, 1988: stopping/parking provisions (illustrative)"},
+    "tailgating": {"title": "Tailgating Summary", "label": "Following too closely",
+                   "fine": 1000, "law": "Motor Vehicles Act, 1988: dangerous-driving provisions (illustrative)"},
+    "unsafe_lane_change": {"title": "Unsafe Lane Change Summary", "label": "Weaving / cutting in",
+                           "fine": 1000, "law": "Motor Vehicles Act, 1988: lane-discipline provisions (illustrative)"},
+}
 LOG_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "echallan_log.json")
 
 
@@ -60,6 +74,9 @@ class Challan:
     vehicle_description: str = ""   # e.g. "white SUV (best guess)"; empty when not identified
     source: str = "manual"          # "manual" form, "speed check" burst, or "live monitor"
     limit_source: str = ""          # where the speed limit came from, e.g. "OpenStreetMap: posted 65 mph"
+    violation_type: str = "speeding"   # one of VIOLATION_INFO
+    violation_detail: str = ""         # what the detector observed, in words
+    confidence_note: str = ""          # "moderate" / "experimental" plus the caveat for that rule
 
 
 def compute_fine(vehicle_class: str, over_mph: float) -> tuple[int, str]:
@@ -98,6 +115,41 @@ def generate_challan(speed_result: dict, camera_name: str, speed_limit_mph: floa
         vehicle_description=vehicle_description,
         source=source,
         limit_source=limit_source,
+        confidence_note="Speed is estimated from video with an assumed camera zoom; it is not radar-validated.",
+    )
+
+
+CONFIDENCE_NOTES = {
+    "moderate": "Rule-based detection from tracked video; may be wrong in dense or occluded traffic.",
+    "experimental": "EXPERIMENTAL rule: lateral and following-distance estimates from a public camera are rough "
+                    "and this flag should be treated as a lead to review, not a finding.",
+}
+
+
+def generate_violation_challan(kind: str, detail: str, confidence: str, vehicle_class: str, camera_name: str,
+                               vehicle_number: str = "", plate_auto_detected: bool = False,
+                               plate_confidence: float = 0.0, vehicle_description: str = "",
+                               source: str = "live monitor") -> Challan:
+    """Challan for a non-speeding violation reported by violations.ViolationDetector."""
+    if kind not in VIOLATION_INFO or kind == "speeding":
+        raise ValueError(f"Unknown violation type for this generator: {kind!r}")
+    info = VIOLATION_INFO[kind]
+    return Challan(
+        challan_id=f"DEMO-{uuid.uuid4().hex[:10].upper()}",
+        issued_at=camera_now_iso(),
+        camera_name=camera_name,
+        vehicle_class=vehicle_class,
+        vehicle_number=vehicle_number.strip() or "NOT READ (plate not legible)",
+        speed_mph=0.0, speed_limit_mph=0.0, over_mph=0.0,
+        fine_inr=info["fine"],
+        legal_reference=info["law"],
+        plate_auto_detected=plate_auto_detected,
+        plate_confidence=round(plate_confidence, 3),
+        vehicle_description=vehicle_description,
+        source=source,
+        violation_type=kind,
+        violation_detail=detail,
+        confidence_note=CONFIDENCE_NOTES.get(confidence, ""),
     )
 
 
@@ -111,6 +163,17 @@ def render_challan_html(challan: Challan) -> str:
         plate_note = "entered manually"
     limit_note = (f'<div style="font-size:11px;opacity:0.6;">({escape(c.limit_source)})</div>'
                   if c.limit_source else "")
+    info = VIOLATION_INFO.get(c.violation_type, VIOLATION_INFO["speeding"])
+    title, label = info["title"], info["label"]
+    if c.violation_type == "speeding":
+        speed_rows = (f'<tr><td style="padding:3px 0;opacity:0.7;">Detected speed</td><td>{c.speed_mph:.1f} mph</td></tr>'
+                      f'<tr><td style="padding:3px 0;opacity:0.7;">Speed limit</td><td>{c.speed_limit_mph:.0f} mph{limit_note}</td></tr>'
+                      f'<tr><td style="padding:3px 0;opacity:0.7;">Over limit by</td><td>{c.over_mph:.1f} mph'
+                      + (f'<div style="font-size:11px;opacity:0.6;">{escape(c.confidence_note)}</div>' if c.confidence_note else '')
+                      + '</td></tr>')
+    else:
+        conf = (f'<div style="font-size:11px;opacity:0.6;">{escape(c.confidence_note)}</div>' if c.confidence_note else "")
+        speed_rows = f'<tr><td style="padding:3px 0;opacity:0.7;">Observed</td><td>{escape(c.violation_detail)}{conf}</td></tr>'
     desc_row = (f'<tr><td style="padding:3px 0;opacity:0.7;">Appearance</td><td>{escape(c.vehicle_description)}</td></tr>'
                 if c.vehicle_description else "")
     return f"""
@@ -120,17 +183,15 @@ max-width:480px;background:#1a0f0f;">
   padding:6px;border-radius:6px;margin-bottom:12px;font-size:12px;letter-spacing:0.5px;">
     {escape(DISCLAIMER)}
   </div>
-  <h3 style="margin:0 0 8px 0;color:#f3f4f6;">Speed Violation Summary (Simulated)</h3>
+  <h3 style="margin:0 0 8px 0;color:#f3f4f6;">{escape(title)} (Simulated)</h3>
   <table style="width:100%;color:#d1d5db;font-size:14px;border-collapse:collapse;">
     <tr><td style="padding:3px 0;opacity:0.7;">Reference No.</td><td><b>{escape(c.challan_id)}</b></td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Recorded</td><td>{escape(c.issued_at)}</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Location</td><td>{escape(c.camera_name)}</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Vehicle</td><td>{escape(c.vehicle_class.title())} — {escape(c.vehicle_number)}
     <div style="font-size:11px;opacity:0.6;">({escape(plate_note)})</div></td></tr>
-    {desc_row}<tr><td style="padding:3px 0;opacity:0.7;">Violation</td><td>Over-speeding</td></tr>
-    <tr><td style="padding:3px 0;opacity:0.7;">Detected speed</td><td>{c.speed_mph:.1f} mph</td></tr>
-    <tr><td style="padding:3px 0;opacity:0.7;">Speed limit</td><td>{c.speed_limit_mph:.0f} mph{limit_note}</td></tr>
-    <tr><td style="padding:3px 0;opacity:0.7;">Over limit by</td><td>{c.over_mph:.1f} mph</td></tr>
+    {desc_row}<tr><td style="padding:3px 0;opacity:0.7;">Violation</td><td>{escape(label)}</td></tr>
+    {speed_rows}
     <tr><td style="padding:3px 0;opacity:0.7;">Fine that would have applied</td><td><b>₹{c.fine_inr}</b> (not charged)</td></tr>
     <tr><td style="padding:3px 0;opacity:0.7;">Reference law</td><td style="font-size:12px;">{escape(c.legal_reference)}</td></tr>
   </table>

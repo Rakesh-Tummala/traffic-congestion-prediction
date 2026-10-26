@@ -151,7 +151,7 @@ and [Fused live prediction (CLI)](#fused-live-prediction-cli).
 | Live camera data       | Caltrans public CCTV JSON feed (`cwwp2.dot.ca.gov`) via `requests` — no API key; per-camera HLS video streams for speed estimation |
 | Dashboard              | Streamlit |
 | Charts / visualization | Altair (24h forecast chart), pydeck (camera location map, click-to-select), Matplotlib/Seaborn (offline model-comparison chart) |
-| Testing                | pytest (136 tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
+| Testing                | pytest (160+ tests: fusion/anomaly/departure logic, explainability, prediction history, real-weather mapping, report generation, route map, feature pipeline, live inference, speed-tracking math, e-challan logic, ANPR, vehicle color/type) |
 | License plate OCR      | EasyOCR (`src/anpr.py`) — optional, on the selected vehicle's crop only, clearly marked as unverified |
 | Vehicle color/type ID  | HSV-filtered k-means (color) + zero-shot CLIP (`openai/clip-vit-base-patch32`, body type), `src/vehicle_attributes.py` — best-effort, confidence shown |
 | Simulated citation demo | `src/echallan.py` — illustrative fine schedule, informational "would have been" framing, local JSON log |
@@ -219,8 +219,27 @@ through the trained model.
 | Linear Regression   | 334.2  | 451.9  | 0.948 |
 | SVR (tuned rbf)     | 253.5  | 397.5  | 0.960 |
 | LSTM (24h lookback) | ~200   | ~295   | ~0.977 |
+| Gradient Boosting   | 143.9  | 218.8  | 0.988 |
 
 (LSTM numbers vary slightly run-to-run from random weight init and early-stopping timing.)
+
+### What the baseline study found (`research/baselines.py`, results in `research/results/results.md`)
+
+The R² of 0.977 was tested against trivial baselines, other model families, ablations, forecast horizons,
+time-series cross-validation and block-bootstrap intervals, all on the same chronological test rows. Findings:
+
+- The LSTM's score reproduces (0.979 over three seeds), **but it is not the best model**: gradient-boosted trees and a
+  random forest reach R² 0.988 (MAE about 142 against 184 for the LSTM, with non-overlapping bootstrap intervals), so
+  Gradient Boosting was added to the app and is now the default.
+- A lookup of the **average volume for the hour and weekday scores R² 0.949**, the same as Linear Regression (0.948):
+  most of what these models learn is the weekly rhythm. Beyond one hour ahead it beats Linear Regression
+  (R² 0.952 against 0.72 to 0.75 at 3 to 12 hours).
+- **Lag features carry the accuracy** (without them Linear Regression falls to 0.709), and **weather adds almost nothing**:
+  weather alone explains 3 to 9% of the variance, and dropping it does not hurt (SVR is even better without it, 0.969).
+- The forecast band on the chart is now a **split-conformal 80% prediction interval** (`models/conformal_intervals.json`,
+  from `research/conformal_intervals.py`); on the later held-out hours 81% to 82% of values fell inside it, as designed.
+- Live use feeds the models *estimated* lags (the seasonal average), so in the app they behave much like the seasonal
+  lookup above; their offline scores are not a measured live accuracy.
 
 (Regenerate with `cd src && python evaluate.py` — trains all three and writes
 `models/model_comparison.png`.)
@@ -594,6 +613,12 @@ See `tests/test_weather.py` and `tests/test_report.py`.
   hls.js (`src/live_video.py`); nothing is proxied or recorded. The congestion reading
   is still computed from the snapshot, not from the video. A dead stream shows a
   message instead of a blank box.
+- **More violation types** (`src/violations.py`, tick "Also flag other violations"): *wrong way* (moving against the flow
+  learned for that part of the road during calibration, so the opposite carriageway is not flagged), *stopped vehicle*
+  (stationary for 6 s while others keep moving), *tailgating* (time headway under 0.6 s; headway is unaffected by the unknown
+  camera zoom) and *unsafe lane change* (weaving or a tight cut-in). The last two are **experimental**. Indicator (turn-signal)
+  and red-light violations cannot be seen at these camera resolutions and are deliberately not attempted. Each challan states
+  its violation, what was observed and a confidence note. Evaluation tooling is in `research/violation_eval.py`.
 - **🧾 Live e-Challan tab, live part.** Pick a district and camera, see its live video, and press Start monitoring. It runs detection on the live video itself. A background worker
   (`src/live_monitor.py`) reads the camera's HLS stream, runs YOLO on about 4 frames per
   second with its own detector instance, tracks vehicles frame to frame
@@ -746,6 +771,13 @@ only, from one 25-minute window; night, rain and fog are untested. No model was
 fine-tuned: that needs bounding-box labels, not the counts collected here (see Future work).
 
 ---
+
+## Research evaluation
+
+`research/` turns the app into a measured study: baselines and ablations, conformal intervals, camera logging aligned to
+PeMS 5-minute bins, camera-vs-detector and speed validation (needs free PeMS downloads), a time-stratified detector
+evaluation with inter-annotator agreement, and violation-rule evaluation on recorded clips. See `research/README.md` for
+what each script answers, what it needs, and which parts are still waiting on data.
 
 ## Limitations and future work
 
