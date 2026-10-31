@@ -613,12 +613,28 @@ See `tests/test_weather.py` and `tests/test_report.py`.
   hls.js (`src/live_video.py`); nothing is proxied or recorded. The congestion reading
   is still computed from the snapshot, not from the video. A dead stream shows a
   message instead of a blank box.
-- **More violation types** (`src/violations.py`, tick "Also flag other violations"): *wrong way* (moving against the flow
-  learned for that part of the road during calibration, so the opposite carriageway is not flagged), *stopped vehicle*
-  (stationary for 6 s while others keep moving), *tailgating* (time headway under 0.6 s; headway is unaffected by the unknown
-  camera zoom) and *unsafe lane change* (weaving or a tight cut-in). The last two are **experimental**. Indicator (turn-signal)
-  and red-light violations cannot be seen at these camera resolutions and are deliberately not attempted. Each challan states
-  its violation, what was observed and a confidence note. Evaluation tooling is in `research/violation_eval.py`.
+- **More violation types** (`src/violations.py`): *wrong way* (moving against the direction that at least 15 distinct
+  vehicles have taken in that part of the image, where hardly anyone recently went the other way, so a two-way stretch never
+  accuses) and *stopped vehicle* (stationary for 6 s while others keep moving) are available but **off by default**: on the
+  final real-traffic replay they raised 5 flags in 16 minutes, and on review all five looked like non-violations (vehicles
+  stopped on a frontage road or lot inside the camera view, and two blurry oncoming cars). *Tailgating* and *unsafe
+  lane change* are an **off-by-default experiment**. Indicator (turn-signal) and red-light violations cannot be seen at
+  these camera resolutions and are deliberately not attempted. Each challan states its violation, what was observed and a
+  confidence note.
+- **Checked on real traffic** (16 minutes of recorded daytime video from four freeway cameras, `research/violation_eval.py`,
+  `research/speed_diag.py`, `research/inject_wrong_way.py`). The first version of the rules failed badly and was fixed:
+  * Wrong way flagged 42 ordinary oncoming cars, because a cell's direction was "learned" from a few early vehicles; the
+    rule now needs 15 distinct vehicles, keeps learning all session, and uses the vehicles' real average direction.
+    After the fix: no false flags on the plain clips, and 7 of 12 cars injected driving backwards along a real lane were
+    flagged (1 stray flag), a modest recall reported as it is.
+  * Tailgating and lane-change rules flagged 65 vehicles in 16 minutes (lateral errors of about a metre are normal at these
+    resolutions), so they are now off by default.
+  * Per-vehicle speed estimates spread by about +-15 mph (middle half of vehicles 42-67 mph on Olive), so "limit + margin"
+    flagged 6-10% of ordinary cars as speeders. A speeding challan now also needs the vehicle to be faster than the typical
+    speed by 2 robust standard deviations of that camera's own speeds; on noisy cameras this means no speeding challans,
+    and the page says so. A labelled **Demo mode** skips the check.
+  * Frames were sampled every 4th frame, so 30 and 50 fps streams were analysed 2-3 times as often as 15 fps ones and
+    every time-based safeguard changed with the camera; sampling is now by stream time (one frame per 0.25 s).
 - **🧾 Live e-Challan tab, live part.** Pick a district and camera, see its live video, and press Start monitoring. It runs detection on the live video itself. A background worker
   (`src/live_monitor.py`) reads the camera's HLS stream, runs YOLO on about 4 frames per
   second with its own detector instance, tracks vehicles frame to frame

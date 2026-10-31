@@ -19,7 +19,7 @@ import torch
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
 
-from data_loader import FEATURE_COLUMNS, TARGET_COLUMN, load_dataset, train_val_test_split  # noqa: E402
+from data_loader import TARGET_COLUMN, load_dataset, train_val_test_split  # noqa: E402
 from train_dl import SEQ_LEN, TrafficLSTM  # noqa: E402
 
 MODELS = os.path.join(HERE, "..", "models")

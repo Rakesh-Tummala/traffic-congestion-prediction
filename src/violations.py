@@ -31,12 +31,13 @@ KINDS = ("wrong_way", "stopped_vehicle", "tailgating", "unsafe_lane_change")
 GRID_COLS, GRID_ROWS = 6, 4
 MOVE_PX_PER_W = 0.45          # image speed (in car widths per second) above which a track counts as moving
 STILL_PX_PER_W = 0.12         # ... and below which it counts as (nearly) stationary
-MIN_FLOW_SAMPLES = 30         # samples a cell needs before its flow direction is trusted
-MIN_FLOW_COHERENCE = 0.80     # |mean unit vector|: 1 = all traffic in the cell goes the same way
+N_DIR_BINS = 8                # directions are counted in 45-degree sectors, per distinct vehicle
+MIN_FLOW_TRACKS = 15          # distinct vehicles a cell needs in its main direction before it can accuse anyone
+OPPOSING_WINDOW_S = 60.0      # opposing vehicles older than this no longer count against a cell
 WRONG_WAY_COS = -0.70         # cosine between the vehicle's motion and the cell's flow
 WRONG_WAY_CONFIRM = 4         # consecutive frames opposing the flow
 STOP_SECONDS = 6.0            # stationary this long among moving traffic
-LANE_CHANGE_M = 2.4           # lateral shift (scaled metres) that counts as a lane change
+LANE_CHANGE_M = 3.0           # lateral shift (scaled metres) that counts as a lane change
 LANE_CHANGE_WINDOW_S = 4.0
 WEAVE_WINDOW_S = 10.0
 CUT_IN_HEADWAY_S = 0.4
@@ -74,43 +75,67 @@ def _width(track) -> float:
 
 
 class FlowField:
-    """Per-cell dominant direction of travel in the image, learned from tracks."""
+    """Per image cell, the DISTINCT vehicles seen moving in each of N_DIR_BINS directions, with when each was last seen.
+    It keeps learning for the whole session, so a carriageway that only looked one-way during the first seconds (light
+    traffic, or a cell that spans both directions) soon shows both directions and stops accusing anyone. Opposing vehicles
+    only count for OPPOSING_WINDOW_S, so one wrong-way car does not blind the cell for the rest of the session, while a
+    real two-way cell (a steady stream both ways) never accuses."""
 
     def __init__(self, width: int, height: int):
         self.width, self.height = width, height
-        self.sx = np.zeros((GRID_ROWS, GRID_COLS))
-        self.sy = np.zeros((GRID_ROWS, GRID_COLS))
-        self.n = np.zeros((GRID_ROWS, GRID_COLS))
+        self.ids = [[[{} for _ in range(N_DIR_BINS)] for _ in range(GRID_COLS)] for _ in range(GRID_ROWS)]
 
     def cell(self, x: float, y: float) -> tuple[int, int]:
         c = min(GRID_COLS - 1, max(0, int(x / self.width * GRID_COLS)))
         r = min(GRID_ROWS - 1, max(0, int(y / self.height * GRID_ROWS)))
         return r, c
 
-    def add(self, x: float, y: float, dx: float, dy: float) -> None:
-        norm = math.hypot(dx, dy)
-        if norm < 1e-6:
+    @staticmethod
+    def _bin(dx: float, dy: float) -> int:
+        return int((math.atan2(dy, dx) + math.pi) / (2 * math.pi) * N_DIR_BINS) % N_DIR_BINS
+
+    def add(self, track_id: int, t: float, x: float, y: float, dx: float, dy: float) -> None:
+        if math.hypot(dx, dy) < 1e-6:
             return
         r, c = self.cell(x, y)
-        self.sx[r, c] += dx / norm
-        self.sy[r, c] += dy / norm
-        self.n[r, c] += 1
+        n = math.hypot(dx, dy)
+        self.ids[r][c][self._bin(dx, dy)][track_id] = (t, dx / n, dy / n)
 
-    def dominant(self, x: float, y: float):
-        """(ux, uy, coherence, n) of the cell, or None when it has too few samples."""
+    def dominant(self, x: float, y: float, t: float | None = None):
+        """(ux, uy, n_main, n_opposing) for the cell, or None while its main direction has fewer than
+        MIN_FLOW_TRACKS distinct vehicles. The main direction is the strongest sector plus its two neighbours;
+        'opposing' counts vehicles in the opposite sector and its neighbours seen within OPPOSING_WINDOW_S of t."""
         r, c = self.cell(x, y)
-        n = self.n[r, c]
-        if n < MIN_FLOW_SAMPLES:
+        bins = self.ids[r][c]
+
+        def ids3(b):
+            return set(bins[(b - 1) % N_DIR_BINS]) | set(bins[b]) | set(bins[(b + 1) % N_DIR_BINS])
+
+        best = max(range(N_DIR_BINS), key=lambda b: len(ids3(b)))
+        main = ids3(best)
+        if len(main) < MIN_FLOW_TRACKS:
             return None
-        mx, my = self.sx[r, c] / n, self.sy[r, c] / n
-        coh = math.hypot(mx, my)
-        if coh < 1e-6:
-            return None
-        return mx / coh, my / coh, coh, int(n)
+        # the lane direction is the average of the main group's real directions (sectors are only used to find the group)
+        mx = my = 0.0
+        for b in ((best - 1) % N_DIR_BINS, best, (best + 1) % N_DIR_BINS):
+            for _, ux, uy in bins[b].values():
+                mx, my = mx + ux, my + uy
+        norm = math.hypot(mx, my) or 1.0
+        mx, my = mx / norm, my / norm
+        against = set()                       # vehicles seen recently going roughly the other way (within 60 degrees)
+        for b in bins:
+            for tid, (seen, ux, uy) in b.items():
+                if (t is None or t - seen <= OPPOSING_WINDOW_S) and ux * mx + uy * my <= -0.5:
+                    against.add(tid)
+        return mx, my, len(main), len(against)
 
 
 class ViolationDetector:
-    def __init__(self, width: int, height: int, learn_seconds: float = 25.0):
+    def __init__(self, width: int, height: int, learn_seconds: float = 25.0, enable_experimental: bool = True):
+        """`enable_experimental` switches the tailgating and lane-change rules on. The app leaves them off by default:
+        replays on real freeway video flagged dozens of ordinary vehicles (lateral position errors of about a metre
+        are normal at these resolutions), so they are research tools until validated."""
+        self.enable_experimental = enable_experimental
         self.flow = FlowField(width, height)
         self.learn_seconds = learn_seconds
         self.t0: float | None = None
@@ -146,12 +171,11 @@ class ViolationDetector:
         events: list[Event] = []
         motion = {tr.track_id: image_motion(tr) for tr in tracks}
 
-        # ---- learn the flow field, then freeze it
-        if t - self.t0 < self.learn_seconds:
-            for tr in tracks:
-                m = motion[tr.track_id]
-                if m and math.hypot(m[0], m[1]) / m[2] >= MOVE_PX_PER_W * _width(tr):
-                    self.flow.add(tr.history[-1][1], tr.history[-1][2], m[0], m[1])
+        # ---- learn the flow field (for the whole session; only the alerts wait for `learn_seconds`)
+        for tr in tracks:
+            m = motion[tr.track_id]
+            if m and math.hypot(m[0], m[1]) / m[2] >= MOVE_PX_PER_W * _width(tr):
+                self.flow.add(tr.track_id, t, tr.history[-1][1], tr.history[-1][2], m[0], m[1])
         self._record_lane_samples(t, tracks, ground)
         self._learn_road_axis(t, tracks, ground)
 
@@ -161,7 +185,7 @@ class ViolationDetector:
         if t - self.t0 >= self.learn_seconds:
             events += self._wrong_way(t, tracks, motion)
             events += self._stopped(t, tracks, motion, moving)
-        if scale and self.road_k is not None:
+        if self.enable_experimental and scale and self.road_k is not None:
             events += self._lanes(t, tracks, ground, scale)
         return [e for e in events if e]
 
@@ -175,8 +199,9 @@ class ViolationDetector:
                 continue
             dx, dy, dt = m
             speed = math.hypot(dx, dy) / dt
-            dom = self.flow.dominant(tr.history[-1][1], tr.history[-1][2])
-            if dom is None or dom[2] < MIN_FLOW_COHERENCE or speed < MOVE_PX_PER_W * _width(tr):
+            dom = self.flow.dominant(tr.history[-1][1], tr.history[-1][2], t)
+            # the cell must have a well-supported main direction and almost nobody going the other way
+            if dom is None or dom[3] > 1 or speed < MOVE_PX_PER_W * _width(tr):   # 1 = only the accused vehicle itself
                 self._wrong[tr.track_id] = 0
                 continue
             cos = (dx * dom[0] + dy * dom[1]) / (math.hypot(dx, dy) + 1e-9)
@@ -185,7 +210,7 @@ class ViolationDetector:
                 if self._wrong[tr.track_id] >= WRONG_WAY_CONFIRM:
                     out.append(self._report("wrong_way", tr, t,
                                             f"moving against the learned flow of this part of the road (cos {cos:+.2f})",
-                                            "moderate", cos=round(cos, 2), coherence=round(dom[2], 2)))
+                                            "moderate", cos=round(cos, 2), vehicles_in_flow=dom[2], vehicles_against=dom[3]))
             else:
                 self._wrong[tr.track_id] = 0
         return out
@@ -210,8 +235,7 @@ class ViolationDetector:
                 self._anchors.append({"x": x, "y": y, "t_first": t, "t_last": t})
                 continue
             a["t_last"] = t
-            dom = self.flow.dominant(x, y)
-            flowing_lane = dom is not None and dom[2] >= 0.6
+            flowing_lane = self.flow.dominant(x, y, t) is not None
             if t - a["t_first"] >= STOP_SECONDS and flowing_lane and n_other_moving >= 3 \
                     and n_other_moving >= 0.6 * max(1, len(tracks) - 1):
                 out.append(self._report("stopped_vehicle", tr, t,

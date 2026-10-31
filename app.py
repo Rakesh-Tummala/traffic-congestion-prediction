@@ -1383,6 +1383,16 @@ def _render_live_monitor():
         if ss == "ok":
             st.success(f"Speed tracking on ({snap['tracks_with_speed']} vehicles tracked, calibration scale "
                        f"x{snap['scale']:.2f}).")
+            if snap.get("flag_threshold") is not None and snap.get("speed_sigma") is not None:
+                thr = snap["flag_threshold"]
+                if thr > 96 or thr > 1.6 * mon.reference_mph:
+                    st.warning(f"Speeds on this camera are too noisy to single out a speeder: they spread by about "
+                               f"±{snap['speed_sigma']:.0f} mph, so a vehicle would need more than {thr:.0f} mph to stand out "
+                               "from normal traffic, and no challans will be issued. Try a camera with a clear straight view, "
+                               "or tick Demo mode before starting to see challans anyway.")
+                else:
+                    st.caption(f"Speeds here spread by about ±{snap['speed_sigma']:.0f} mph, so a vehicle is flagged only above "
+                               f"{thr:.0f} mph (over the limit by the margin and clearly faster than the traffic around it).")
             if snap["scale"] > 1.8 or snap["scale"] < 0.55:
                 st.caption("⚠️ A large correction was needed to match the typical traffic speed you set, so "
                            "these speeds are mostly *relative to the flow of traffic* (who is faster than "
@@ -1431,10 +1441,13 @@ with mode_live:
             "calibration). The camera's zoom is unknown, so speeds are also scaled so the median vehicle matches "
             "the *typical traffic speed* you set below. Speeds are only estimated for vehicles in a reliable "
             "distance band, and if the camera model is not convincing, speeds and challans are switched off.\n"
-            "- **Other violations** are flagged by rules on the same tracks: *wrong way* (moving against the flow "
+            "- **Other violations** (all off by default; tick them below) are flagged by rules on the same tracks: *wrong way* (moving against the flow "
             "learned from the traffic, cell by cell), *stopped vehicle* (stationary for 6 s while others move), "
-            "*tailgating* (time headway under 0.6 s) and *unsafe lane change* (weaving or a tight cut-in). Wrong-way "
-            "and stopped-vehicle are rule-based and need no speed calibration; the last two are **experimental**. "
+            "and, as an **off-by-default experiment**, *tailgating* (time headway under 0.6 s) and *unsafe lane change*. "
+            "Tests on real freeway video flagged ordinary cars with those two, so they stay off. Wrong-way and "
+            "stopped-vehicle need no speed calibration. A speeding challan also needs the vehicle to stand out from the "
+            "camera's own spread of speeds (typical speed + 2 robust standard deviations), because per-vehicle speed "
+            "estimates are noisy; Demo mode skips that check. "
             "Turn signals cannot be seen at this camera resolution, so indicator violations are not detected.\n"
             "- **Treat speeds as rough estimates** (easily 20-30% off, and not validated against radar). "
             "A challan here is a demonstration of the pipeline, never evidence of a real violation.\n"
@@ -1500,8 +1513,13 @@ with mode_live:
         lo1, lo2 = st.columns(2)
         lm_plates = lo1.checkbox("Try to read license plates (slow; plates are rarely legible)", key="live_plates")
         lm_ident = lo2.checkbox("Identify color and type (slow; first run downloads a model)", key="live_ident")
-        lm_viol = st.checkbox("Also flag other violations: wrong-way, stopped vehicle, tailgating, unsafe lane change "
-                              "(the last two are experimental)", value=True, key="live_violations")
+        lm_viol = st.checkbox("Also flag wrong-way driving and stopped vehicles (on 16 min of recorded real traffic these "
+                              "raised 5 flags, all of which looked like non-violations, e.g. a bus stopped on a side road)",
+                              value=False, key="live_violations")
+        lm_exp = st.checkbox("Experimental: also flag tailgating and unsafe lane changes (noisy; flagged ordinary cars in "
+                             "tests, for research only)", value=False, key="live_experimental")
+        lm_demo = st.checkbox("Demo mode: skip the speed-noise check (challans may be issued for vehicles that only look "
+                              "fast because the camera's speed estimates are noisy)", value=False, key="live_demo_mode")
 
         lm_caption, lm_limit_source = _limit_caption(lm_info, lm_limit) if lm_auto else ("", "entered manually")
         if lm_caption:
@@ -1518,7 +1536,8 @@ with mode_live:
             new_mon = LiveMonitor(lm_cam["stream_url"], f"{lm_cam['name']} ({lm_cam['nearby_place']})",
                                   limit_mph=lm_limit, margin_mph=lm_margin, reference_mph=lm_ref,
                                   run_seconds=float(lm_secs), read_plates=lm_plates, identify=lm_ident,
-                                  limit_source=lm_limit_source, detect_violations=lm_viol)
+                                  limit_source=lm_limit_source, detect_violations=lm_viol,
+                                  experimental_violations=lm_exp, demo_mode=lm_demo)
             new_mon.start()
             st.session_state["live_monitor"] = new_mon
             st.session_state.pop("_live_final_rerun", None)

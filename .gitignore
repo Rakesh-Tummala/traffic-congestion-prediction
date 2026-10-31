@@ -21,3 +21,5 @@ models/speed_limits_cache.json
 research/data/
 research/*.log
 research/*.err
+research/results/violation_events/
+research/results/*.jpg

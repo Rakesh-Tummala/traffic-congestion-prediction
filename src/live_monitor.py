@@ -28,7 +28,8 @@ from echallan import append_to_log, generate_challan, generate_violation_challan
 from vehicle_tracking import CalibrationFitter, CentroidTracker, estimate_speed_mph
 from violations import ViolationDetector
 
-SAMPLE_EVERY = 4              # process every 4th frame (15 fps stream -> ~3.75 Hz)
+SAMPLE_EVERY = 4              # fallback when the stream has no usable clock: every 4th frame
+SAMPLE_INTERVAL_S = 0.25      # normally: one analysed frame per >= 0.25 s of stream time (15 fps -> every 4th frame), whatever the frame rate
 TRACK_CONF = 0.30             # confidence for detections fed to the tracker
 CALIBRATION_SECONDS = 25.0    # stream seconds spent collecting cars for the camera fit
 MIN_TRACKS_FOR_SCALE = 12     # tracked vehicles needed before the traffic-speed scale is trusted
@@ -44,7 +45,11 @@ MAX_SPEED_RATIO = 1.6
 # far cars reading far faster than near ones in the same traffic, so speeds and challans are
 # limited to this band of distances from the camera (metres down the road).
 RANGE_BAND_M = (8.0, 75.0)
-CONFIRMATIONS = 3             # consecutive evaluations above the threshold before a challan
+CONFIRMATIONS = 6             # consecutive evaluations (about 1.6 s of stream) above the threshold before a challan
+# Real-traffic replays (see research/speed_diag.py) showed per-vehicle speed estimates spread by +-15 mph or more, so a
+# fixed 'limit + margin' flagged 6-10% of ordinary cars. A vehicle is therefore only flagged when it also stands out from
+# the traffic around it: faster than the typical speed by this many robust standard deviations of that camera's speeds.
+OUTLIER_SIGMAS = 2.0
 MAX_EVENTS = 12               # a session never issues more than this many challans
 MIN_EVENT_GAP_S = 3.0         # stream seconds between challans (a tracker glitch can't machine-gun them)
 IDLE_STOP_SECONDS = 45.0      # stop if the page stops polling (user closed it)
@@ -55,6 +60,23 @@ FLAG_SHOW_SECONDS = 4.0       # how long a flagged vehicle keeps its violation l
 
 def violation_threshold(limit_mph: float, margin_mph: float) -> float:
     return limit_mph + margin_mph
+
+
+def robust_sigma(values) -> float:
+    """Spread of a set of speeds that ignores a few outliers (1.4826 x the median absolute deviation)."""
+    v = np.asarray(values, dtype=float)
+    return float(1.4826 * np.median(np.abs(v - np.median(v)))) if len(v) else 0.0
+
+
+def flag_threshold(limit_mph: float, margin_mph: float, reference_mph: float, sigma_mph: float | None,
+                   demo_mode: bool = False) -> float:
+    """Speed a vehicle must exceed to be flagged: over the limit by the margin AND clearly faster than the traffic around it
+    (typical speed + OUTLIER_SIGMAS x the camera's own speed spread). `demo_mode` drops the second condition so that noisy
+    cameras still produce challans for a demonstration."""
+    base = violation_threshold(limit_mph, margin_mph)
+    if demo_mode or sigma_mph is None:
+        return base
+    return max(base, reference_mph + OUTLIER_SIGMAS * sigma_mph)
 
 
 def is_plausible_speed(mph: float, reference_mph: float) -> bool:
@@ -80,10 +102,11 @@ class LiveMonitor:
                  reference_mph: float = 60.0, run_seconds: float = 120.0, read_plates: bool = False,
                  identify: bool = False, weights: str = "yolov8s.pt", limit_source: str = "",
                  detect_violations: bool = True, max_events: int = MAX_EVENTS, min_event_gap_s: float = MIN_EVENT_GAP_S,
-                 log_challans: bool = True):
+                 log_challans: bool = True, experimental_violations: bool = False, demo_mode: bool = False):
         self.stream_url, self.camera_name, self.limit_source = stream_url, camera_name, limit_source
         self.detect_violations = detect_violations
         self.max_events, self.min_event_gap_s, self.log_challans = max_events, min_event_gap_s, log_challans
+        self.experimental_violations, self.demo_mode = experimental_violations, demo_mode
         self.limit_mph, self.margin_mph, self.reference_mph = limit_mph, margin_mph, reference_mph
         self.run_seconds, self.read_plates, self.identify, self.weights = run_seconds, read_plates, identify, weights
         self._lock = threading.Lock()
@@ -95,7 +118,8 @@ class LiveMonitor:
         self.state = {"status": "idle", "message": "", "frame": None, "vehicle_count": 0, "density": 0.0,
                       "congestion": None, "speed_status": "waiting", "events": [], "tracks_with_speed": 0,
                       "scale": None, "calibration": None, "elapsed": 0.0, "fps": 0.0,
-                      "raw_speed_median": None}
+                      "raw_speed_median": None, "track_speeds": {}, "speed_sigma": None,
+                      "flag_threshold": None}
 
     # ------------------------------------------------------------------ control
     def start(self) -> None:
@@ -147,7 +171,7 @@ class LiveMonitor:
             raw_speed: dict[int, float] = {}
             consecutive: dict[int, int] = {}
             n, t_first, last_wall, density_hist, last_event_t = 0, None, time.time(), [], -1e9
-            viol, flag_labels = None, {}
+            viol, flag_labels, last_t, speed_sigma = None, {}, None, None
             self._set(status="calibrating", message="Watching traffic to calibrate the camera view...")
 
             while not self._should_stop():
@@ -156,17 +180,23 @@ class LiveMonitor:
                               message="The stream ended or stopped responding.")
                     return
                 n += 1
-                if n % SAMPLE_EVERY:
+                t_pos = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+                # Caltrans streams run at 15, 30 or 50 fps. Sampling by stream time keeps every time-based
+                # safeguard (confirmations, speed windows, stop timers) independent of the camera's frame rate.
+                if last_t is not None and t_pos > last_t:
+                    if t_pos - last_t < SAMPLE_INTERVAL_S:
+                        continue
+                elif n % SAMPLE_EVERY:
                     continue
                 ok, frame = cap.retrieve()
                 if not ok:
                     continue
-                t = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+                t = last_t = t_pos
                 t_first = t if t_first is None else t_first
                 h, w = frame.shape[:2]
                 if fitter is None:
                     fitter = CalibrationFitter(w, h)
-                    viol = ViolationDetector(w, h, CALIBRATION_SECONDS)
+                    viol = ViolationDetector(w, h, CALIBRATION_SECONDS, enable_experimental=self.experimental_violations)
 
                 res = model.predict(frame, conf=DEFAULT_CONF, imgsz=640, classes=list(VEHICLE_CLASS_IDS),
                                     verbose=False)[0]
@@ -209,6 +239,11 @@ class LiveMonitor:
                         speed_status = "calibrating"
                     elif scale is None:
                         speed_status = "unreliable"
+                    if scale is not None:
+                        sig = robust_sigma([v * scale for v in raw_speed.values()])
+                        speed_sigma = sig if speed_sigma is None else 0.9 * speed_sigma + 0.1 * sig
+                thr_flag = (flag_threshold(self.limit_mph, self.margin_mph, self.reference_mph, speed_sigma, self.demo_mode)
+                            if scale is not None else None)
 
                 # --- other violation types (wrong way, stopped, tailgating, unsafe lane change)
                 if viol is not None and self.detect_violations:
@@ -240,8 +275,8 @@ class LiveMonitor:
                         plausible = is_plausible_speed(mph, self.reference_mph)
                         label = f"{trk.cls_name} {mph:.0f} mph" if plausible else trk.cls_name
                         over = mph - self.limit_mph
-                        color = (RED if over >= self.margin_mph else ORANGE if over > 0 else GREEN) if plausible else GRAY
-                        if plausible and mph >= violation_threshold(self.limit_mph, self.margin_mph) \
+                        color = (RED if mph >= thr_flag else ORANGE if over > 0 else GREEN) if plausible else GRAY
+                        if plausible and mph >= thr_flag \
                                 and not trk.flagged and len(trk.history) >= 5:
                             consecutive[trk.track_id] = consecutive.get(trk.track_id, 0) + 1
                             if consecutive[trk.track_id] >= CONFIRMATIONS:  # several in a row, not one noisy one
@@ -264,8 +299,9 @@ class LiveMonitor:
                 density = float(np.mean(density_hist))
                 self._set(frame=annotated, vehicle_count=len(dets), density=round(density, 4),
                           congestion=congestion_from_density(density), speed_status=speed_status,
-                          tracks_with_speed=len(raw_speed), scale=scale,
+                          tracks_with_speed=len(raw_speed), scale=scale, speed_sigma=speed_sigma, flag_threshold=thr_flag,
                           raw_speed_median=(float(np.median(list(raw_speed.values()))) if raw_speed else None),
+                          track_speeds=({tid: raw * scale for tid, raw in raw_speed.items()} if scale else {}),
                           fps=1.0 / max(1e-3, now - last_wall))
                 last_wall = now
             self._set(status="stopped", message="Monitoring finished.")
@@ -296,7 +332,7 @@ class LiveMonitor:
         pad_x, pad_y = int(0.15 * (x2 - x1)), int(0.15 * (y2 - y1))
         crop = frame[max(0, y1 - pad_y):min(h, y2 + pad_y), max(0, x1 - pad_x):min(w, x2 + pad_x)].copy()
         event = {"time": camera_now().strftime("%H:%M:%S"), "cls_name": trk.cls_name, "speed_mph": None,
-                 "violation": ev.kind, "detail": ev.detail, "confidence": ev.confidence,
+                 "violation": ev.kind, "detail": ev.detail, "confidence": ev.confidence, "stream_t": ev.t,
                  "crop": crop, "challan": None, "plate": None, "attrs": None, "status": "processing"}
         with self._lock:
             self.state["events"].append(event)

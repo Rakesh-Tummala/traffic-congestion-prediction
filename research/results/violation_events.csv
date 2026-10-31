@@ -1,0 +1,6 @@
+clip,type,time,detail,confidence,image
+i210_citrus_20261031T160108Z.mp4,wrong_way,10:26:11,moving against the learned flow of this part of the road (cos -0.89),moderate,i210_citrus_20261031T160108Z_000_wrong_way.jpg
+i210_citrus_20261031T160108Z.mp4,wrong_way,10:27:04,moving against the learned flow of this part of the road (cos -1.00),moderate,i210_citrus_20261031T160108Z_001_wrong_way.jpg
+i5_olive_20261031T160452Z.mp4,stopped_vehicle,10:30:34,stationary for 7 s while 7 other vehicles kept moving,moderate,i5_olive_20261031T160452Z_000_stopped_vehicle.jpg
+i5_olive_20261031T160452Z.mp4,stopped_vehicle,10:31:16,stationary for 6 s while 15 other vehicles kept moving,moderate,i5_olive_20261031T160452Z_001_stopped_vehicle.jpg
+i5_olive_20261031T160452Z.mp4,stopped_vehicle,10:31:32,stationary for 6 s while 12 other vehicles kept moving,moderate,i5_olive_20261031T160452Z_002_stopped_vehicle.jpg

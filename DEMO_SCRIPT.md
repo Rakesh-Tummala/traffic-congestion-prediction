@@ -91,13 +91,20 @@ Show **Click the map** (drop two points) and **Pick cameras** in 15 seconds each
    - "For the first 25 seconds it learns the camera's geometry from the traffic itself. There is no
      calibration data for these cameras."
    - Then boxes show **estimated speeds**, and the badge and vehicle counter update live.
-3. When a car is clearly over the limit a **simulated challan** appears with the car's picture, time,
-   speed, limit and its source. (To force one in a quiet moment, lower the limit and margin first.)
+3. When a car is clearly over the limit **and** clearly faster than the traffic around it, a **simulated
+   challan** appears with the car's picture, time, speed, limit and its source. On many cameras the speed
+   estimates are too noisy for that, and the page says "too noisy to single out a speeder". That is the
+   honest answer; if you want challans to appear for the demo, tick **Demo mode** *before* pressing Start
+   and say so: "Demo mode skips the noise check, so these are demonstrations, not detections."
+   The other violation types (wrong-way, stopped vehicle, tailgating, lane change) are off by default: in
+   tests on recorded real traffic they flagged vehicles that were not violating, and you can say exactly that.
 4. Scroll down: **Generate demo challan** (made-up values), the **history** table, **Download history
    (CSV)**, and **Clear history**.
 5. **Say this clearly:** "This is simulated. The speeds are estimates, not validated against radar, so
    I built in safeguards: it refuses to issue anything if the camera can't be calibrated, a car must stay
-   over the limit for three measurements in a row, and a session issues at most 12 challans."
+   over the threshold for about 1.6 seconds, it must stand out from the camera's own spread of speeds, and a
+   session issues at most 12 challans. When I tested on recorded real traffic, my first version flagged
+   ordinary cars, so I measured it and tightened it." (That is a strong thing to say in a viva.)
 
 ## 6. Closing (1 minute): under the hood
 

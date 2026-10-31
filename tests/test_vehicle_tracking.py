@@ -148,3 +148,21 @@ def test_speeds_far_above_the_surrounding_traffic_are_treated_as_tracking_errors
     assert not is_plausible_speed(97.6, 60) and not is_plausible_speed(119.3, 60)  # glitches seen in a live test
     assert not is_plausible_speed(MAX_PLAUSIBLE_MPH + 1, 200)                  # the absolute cap still applies
     assert is_plausible_speed(40, 25)                                          # slow traffic: ratio allows 40
+
+
+# ---- speed-noise gating (added after real-traffic replays flagged 6-10% of ordinary cars) -------------------------
+def test_robust_sigma_ignores_a_few_outliers():
+    from live_monitor import robust_sigma
+    assert abs(robust_sigma([58, 60, 62, 59, 61, 60, 300]) - 1.5 * 1.4826 / 1.5) < 2.5
+    assert robust_sigma([]) == 0.0
+
+
+def test_flag_threshold_requires_standing_out_from_the_traffic():
+    from live_monitor import flag_threshold
+    # quiet camera (spread 3 mph): the limit + margin dominates
+    assert flag_threshold(65, 15, 60, 3.0) == 80
+    # noisy camera (spread 15 mph): a car must be 2 sigma above the typical speed, far above limit + margin
+    assert flag_threshold(65, 15, 60, 15.0) == 90
+    # demo mode and an unknown spread fall back to limit + margin
+    assert flag_threshold(65, 15, 60, 15.0, demo_mode=True) == 80
+    assert flag_threshold(65, 15, 60, None) == 80

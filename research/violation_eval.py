@@ -38,10 +38,11 @@ REVIEW_DIR = os.path.join(RESULTS, "violation_events")
 REVIEW_CSV = os.path.join(RESULTS, "violation_review.csv")
 
 
-def run_clip(path, reference_mph=60.0, max_wait_s=3600):
+def run_clip(path, reference_mph=60.0, max_wait_s=3600, experimental=False, demo_mode=False):
     from live_monitor import LiveMonitor
     mon = LiveMonitor(path, os.path.basename(path), run_seconds=max_wait_s, reference_mph=reference_mph,
-                      max_events=10 ** 6, min_event_gap_s=0.0, log_challans=False)
+                      max_events=10 ** 6, min_event_gap_s=0.0, log_challans=False,
+                      experimental_violations=experimental, demo_mode=demo_mode)
     mon.start()
     t0 = time.time()
     while mon.running and time.time() - t0 < max_wait_s:
@@ -78,7 +79,7 @@ def cmd_replay(args):
     for path in paths:
         dur = clip_seconds(path)
         total_s += dur
-        snap = run_clip(path)
+        snap = run_clip(path, experimental=args.experimental, demo_mode=args.demo_mode)
         for i, ev in enumerate(snap["events"]):
             kind = ev.get("violation") or "speeding"
             name = f"{os.path.splitext(os.path.basename(path))[0]}_{i:03d}_{kind}.jpg"
@@ -159,6 +160,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("replay")
     r.add_argument("--clips", nargs="+", required=True)
+    r.add_argument("--experimental", action="store_true", help="also run the tailgating and lane-change rules")
+    r.add_argument("--demo-mode", action="store_true", help="skip the speed-noise check on speeding")
     sub.add_parser("score")
     v = sub.add_parser("reversal")
     v.add_argument("--clip", required=True)

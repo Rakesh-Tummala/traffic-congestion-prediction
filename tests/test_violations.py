@@ -192,3 +192,32 @@ def test_each_vehicle_is_reported_once_per_violation_type():
     d = ViolationDetector(W, H, learn_seconds=25.0)
     ev = [e for e in run(cars, 45, d) if e.kind == "wrong_way" and e.track_id == 500]
     assert len(ev) == 1
+
+
+def test_a_cell_that_also_carries_oncoming_traffic_is_never_used_to_accuse():
+    """Regression for a real-traffic failure: oncoming cars were flagged because the flow of a cell that spans
+    both carriageways had been 'learned' from a few early vehicles going one way."""
+    cars = stream(100, 60, 50, 22, 1.0, 1)                       # 22 cars down in the first 22 s, nothing the other way
+    cars += stream(100, 60, 340, 22, 1.0, 100, direction=-1)      # then a steady stream of oncoming cars
+    for c in cars[22:]:
+        c.t_start += 24.0
+        c.t_end += 24.0
+    d = ViolationDetector(W, H, learn_seconds=25.0)
+    ev = [e for e in run(cars, 60, d) if e.kind == "wrong_way"]
+    assert len(ev) <= 1       # at most the very first oncoming car, before anyone can tell it from a wrong-way car
+
+
+def test_wrong_way_needs_a_well_supported_main_flow():
+    cars = stream(100, 60, 50, 6, 1.0, 1)                         # only 6 distinct vehicles ever seen in the cell
+    cars.append(Car(500, lambda dt: (100, 330 - 60 * dt), 31.0, 35.5))
+    d = ViolationDetector(W, H, learn_seconds=25.0)
+    assert not [e for e in run(cars, 42, d) if e.kind == "wrong_way"]
+
+
+def test_a_second_wrong_way_car_later_in_the_session_is_still_flagged():
+    cars = stream(100, 60, 50, 150, 1.0, 1)                               # steady one-way traffic for 150 s
+    cars.append(Car(500, lambda dt: (100, 330 - 60 * dt), 31.0, 35.5))     # first wrong-way car
+    cars.append(Car(501, lambda dt: (100, 330 - 60 * dt), 120.0, 124.5))   # another, 90 s later
+    d = ViolationDetector(W, H, learn_seconds=25.0)
+    flagged = {e.track_id for e in run(cars, 130, d) if e.kind == "wrong_way"}
+    assert flagged == {500, 501}

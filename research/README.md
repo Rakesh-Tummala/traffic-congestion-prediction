@@ -14,7 +14,8 @@ Everything needed to turn the app into a measured study. Run all commands from t
 | How good is the detector across the day? (A5) | `sample_for_labels.py`, label, `detector_eval.py` | logged frames + labels | `detector_by_time.csv` |
 | Are the hand counts reliable? | `label_agreement.py` | a second annotator's counts | printed |
 | How often do the violation rules fire, and how often are they right? (B1) | `record_clip.py`, `violation_eval.py replay`, review, `violation_eval.py score` | recorded clips + human review | `violation_rates.csv`, `violation_precision.csv` |
-| Do the wrong-way rule's recall hold up? (B1) | `violation_eval.py reversal` | one recorded clip | `violation_reversal.csv` |
+| Does the wrong-way rule catch a car going the wrong way? (B1) | `inject_wrong_way.py` (drives a real car image backwards along a real lane) | recorded clips | `wrong_way_injection.csv` |
+| How noisy are the speed estimates on a camera? | `speed_diag.py` | a recorded clip | printed percentiles |
 
 ## PeMS (ground truth)
 
